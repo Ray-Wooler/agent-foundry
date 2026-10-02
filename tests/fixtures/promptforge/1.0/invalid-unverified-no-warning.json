@@ -1,0 +1,143 @@
+{
+  "transformation_id": "PFT-TEST-0001",
+  "source": {
+    "artifact_id": "SRC-TEST",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "rights_status": "UNVERIFIED"
+  },
+  "configuration": {
+    "aps_version": "1.5-alpha",
+    "target_class": "specialist",
+    "requested_extensions": [],
+    "constraints": []
+  },
+  "stages": [
+    {
+      "name": "SOURCE_CAPTURE",
+      "status": "PASS",
+      "evidence": [
+        "source_capture evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "INTENT_ANALYSIS",
+      "status": "PASS",
+      "evidence": [
+        "intent_analysis evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "DEFECT_ANALYSIS",
+      "status": "PASS",
+      "evidence": [
+        "defect_analysis evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "ONTOLOGY_MAPPING",
+      "status": "PASS",
+      "evidence": [
+        "ontology_mapping evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "CAPABILITY_EXTRACTION",
+      "status": "PASS",
+      "evidence": [
+        "capability_extraction evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "GOVERNANCE_CONSTRUCTION",
+      "status": "PASS",
+      "evidence": [
+        "governance_construction evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "EPISTEMIC_CONSTRUCTION",
+      "status": "NOT_APPLICABLE",
+      "evidence": [
+        "not required for fixture"
+      ],
+      "findings": []
+    },
+    {
+      "name": "OPERATIONAL_CONSTRUCTION",
+      "status": "PASS",
+      "evidence": [
+        "operational_construction evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "CANDIDATE_GENERATION",
+      "status": "PASS",
+      "evidence": [
+        "candidate_generation evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "VALIDATION",
+      "status": "PASS",
+      "evidence": [
+        "validation evidence"
+      ],
+      "findings": []
+    },
+    {
+      "name": "TRANSFORMATION_RECORD",
+      "status": "PASS",
+      "evidence": [
+        "transformation_record evidence"
+      ],
+      "findings": []
+    }
+  ],
+  "candidate": {
+    "sha256": "bdb80744213ef1be05446c4778eefef342d17cc42e500f07a32a7fd2466d7daa",
+    "aps_document": {
+      "aps_version": "1.5-alpha",
+      "agent": {
+        "id": "golden",
+        "name": "Golden",
+        "version": "0.1.0",
+        "class": "specialist"
+      },
+      "mandate": {
+        "purpose": "test PromptForge",
+        "primary_objective": "produce a valid candidate"
+      },
+      "capabilities": [],
+      "governance": {
+        "authority": {
+          "recommendation": [
+            "assess"
+          ],
+          "execution": [],
+          "delegation": [],
+          "approval_required": [],
+          "prohibited": [
+            "fabricate_execution"
+          ]
+        },
+        "policies": []
+      }
+    }
+  },
+  "status": "CANDIDATE",
+  "warnings": [],
+  "integrity": {
+    "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "candidate_sha256": "bdb80744213ef1be05446c4778eefef342d17cc42e500f07a32a7fd2466d7daa",
+    "model_identity": "test-fixture",
+    "transformer_version": "promptforge-contract-1.0"
+  }
+}
