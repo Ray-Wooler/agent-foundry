@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foundry.frankai.online/schemas/aps/1.5-alpha/agent.schema.json",
+  "title": "Agent Prompt Specification v1.5-alpha",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["aps_version", "agent", "mandate", "capabilities", "governance"],
+  "properties": {
+    "aps_version": { "const": "1.5-alpha" },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version", "class"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "class": {
+          "enum": ["orchestrator", "specialist", "builder", "analyst", "advisor", "monitor", "communicator", "reviewer"]
+        },
+        "description": { "type": "string" }
+      }
+    },
+    "mandate": {
+      "type": "object",
+      "required": ["purpose", "primary_objective"],
+      "properties": {
+        "purpose": { "type": "string", "minLength": 1 },
+        "primary_objective": { "type": "string", "minLength": 1 },
+        "secondary_objectives": { "type": "array", "items": { "type": "string" } },
+        "non_goals": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" }
+    },
+    "governance": {
+      "type": "object",
+      "required": ["authority"],
+      "properties": {
+        "authority": { "$ref": "#/$defs/authority" },
+        "policies": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "epistemic": { "type": "object" },
+    "operational": { "type": "object" },
+    "extensions": { "type": "object" }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "inputs": { "type": "array", "items": { "type": "string" } },
+        "outputs": { "type": "array", "items": { "type": "string" } },
+        "preconditions": { "type": "array", "items": { "type": "string" } },
+        "required_permissions": { "type": "array", "items": { "type": "string" } },
+        "side_effect_classes": { "type": "array", "items": { "type": "string" } },
+        "evidence_requirements": { "type": "array", "items": { "type": "string" } },
+        "acceptance_criteria": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": ["recommendation", "execution", "delegation"],
+      "properties": {
+        "recommendation": { "type": "array", "items": { "type": "string" } },
+        "execution": { "type": "array", "items": { "type": "string" } },
+        "delegation": { "type": "array", "items": { "type": "string" } },
+        "approval_required": { "type": "array", "items": { "type": "string" } },
+        "prohibited": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
