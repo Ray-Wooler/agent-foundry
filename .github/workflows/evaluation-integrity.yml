@@ -1,0 +1,43 @@
+name: Evaluation Integrity
+
+on:
+  pull_request:
+    paths:
+      - "schemas/evaluation/**"
+      - "scripts/validate_evaluation.py"
+      - "tests/fixtures/evaluation/**"
+      - "docs/architecture/ADR/0007-evaluation-framework.md"
+      - ".github/workflows/evaluation-integrity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/evaluation/**"
+      - "scripts/validate_evaluation.py"
+      - "tests/fixtures/evaluation/**"
+
+permissions:
+  contents: read
+
+jobs:
+  evaluation-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-validation.txt
+      - name: Validate evaluation suite
+        run: python scripts/validate_evaluation.py --kind suite tests/fixtures/evaluation/1.0/agr-0001-boundary-suite.json
+      - name: Validate accepted evaluation run
+        run: python scripts/validate_evaluation.py --kind run tests/fixtures/evaluation/1.0/valid-run-pass.json
+      - name: Assert invalid evaluation runs fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fixture in tests/fixtures/evaluation/1.0/invalid-run-*.json; do
+            if python scripts/validate_evaluation.py --kind run "$fixture"; then
+              echo "Expected evaluation validation failure: $fixture"
+              exit 1
+            fi
+          done
