@@ -30,6 +30,12 @@ jobs:
       - name: Validate accepted transformation records
         run: |
           python scripts/validate_promptforge.py             tests/fixtures/promptforge/1.0/valid-candidate.json             tests/fixtures/promptforge/1.0/valid-requires-review.json
+      - name: Verify AGR-0001 golden transformation end-to-end
+        run: |
+          python scripts/verify_golden_transformation.py \
+            --source agents/AGR-0001-automation-governance-architect/source/source.md \
+            --aps agents/AGR-0001-automation-governance-architect/agent.aps.json \
+            --record agents/AGR-0001-automation-governance-architect/transformation.json
       - name: Assert invalid transformation records fail
         shell: bash
         run: |
