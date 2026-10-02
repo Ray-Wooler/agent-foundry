@@ -20,8 +20,8 @@ Status: ACTIVE
 | G2 | All 15 APS invariants have machine-testable representation or documented validator rule | specification/APS-1.5-alpha/INVARIANTS.md + required APS Conformance check | PASS / VERIFIED |
 | G3 | Registry persistence | Registry Integrity run 36982620734 + ADR-0005 + migration/integrity tests | PASS / VERIFIED |
 | G4 | PromptForge transformation | PromptForge Integrity run 36986147469 + AGR-0001 golden transformation | PASS / VERIFIED / ENFORCED |
-| G5 | Evaluation framework | ADR-0007 + schemas/tests/CI | IN PROGRESS |
-| G6 | Generic + OpenAI compilation | pending | NOT STARTED |
+| G5 | Evaluation framework | Evaluation Integrity run 36987197183 + AGR-0001 executed boundary evaluation | PASS / VERIFIED / ENFORCED |
+| G6 | Generic + OpenAI compilation | ADR-0008 + compiler/tests/CI | IN PROGRESS |
 | G7 | Immutable release packaging | pending | NOT STARTED |
 | G8 | FrankAI integration | pending | NOT STARTED |
 
