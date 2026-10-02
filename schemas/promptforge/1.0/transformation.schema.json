@@ -1,0 +1,17 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"https://foundry.frankai.online/schemas/promptforge/1.0/transformation.schema.json",
+ "title":"PromptForge Transformation Contract v1.0",
+ "type":"object","additionalProperties":false,
+ "required":["transformation_id","source","configuration","stages","candidate","status","integrity"],
+ "properties":{
+  "transformation_id":{"type":"string","minLength":1},
+  "source":{"type":"object","required":["artifact_id","sha256","rights_status"],"properties":{"artifact_id":{"type":"string","minLength":1},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"rights_status":{"enum":["VERIFIED","UNVERIFIED","RESTRICTED","PROHIBITED"]}}},
+  "configuration":{"type":"object","required":["aps_version","target_class"],"properties":{"aps_version":{"const":"1.5-alpha"},"target_class":{"type":"string","minLength":1},"requested_extensions":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}}}},
+  "stages":{"type":"array","minItems":1,"items":{"type":"object","required":["name","status","evidence"],"properties":{"name":{"enum":["SOURCE_CAPTURE","INTENT_ANALYSIS","DEFECT_ANALYSIS","ONTOLOGY_MAPPING","CAPABILITY_EXTRACTION","GOVERNANCE_CONSTRUCTION","EPISTEMIC_CONSTRUCTION","OPERATIONAL_CONSTRUCTION","CANDIDATE_GENERATION","VALIDATION","TRANSFORMATION_RECORD"]},"status":{"enum":["PASS","PARTIAL","FAIL","REQUIRES_REVIEW","NOT_APPLICABLE"]},"evidence":{"type":"array","items":{"type":"string"}},"findings":{"type":"array","items":{"type":"string"}}}}},
+  "candidate":{"type":"object","required":["sha256","aps_document"],"properties":{"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"aps_document":{"type":"object"}}},
+  "status":{"enum":["CANDIDATE","REQUIRES_REVIEW","FAILED"]},
+  "warnings":{"type":"array","items":{"type":"string"}},
+  "integrity":{"type":"object","required":["source_sha256","candidate_sha256","transformer_version"],"properties":{"source_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"candidate_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"model_identity":{"type":["string","null"]},"transformer_version":{"type":"string","minLength":1}}}
+ }
+}
