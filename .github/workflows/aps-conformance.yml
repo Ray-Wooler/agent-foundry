@@ -1,0 +1,42 @@
+name: APS Conformance
+
+on:
+  pull_request:
+    paths:
+      - "schemas/**"
+      - "specification/**"
+      - "scripts/validate_aps.py"
+      - "tests/fixtures/aps/**"
+      - ".github/workflows/aps-conformance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/**"
+      - "specification/**"
+      - "scripts/validate_aps.py"
+      - "tests/fixtures/aps/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-validation.txt
+      - name: Validate positive APS fixtures
+        run: python scripts/validate_aps.py tests/fixtures/aps/1.5-alpha/minimal-valid.json
+      - name: Assert invalid fixtures fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fixture in tests/fixtures/aps/1.5-alpha/invalid-*.json; do
+            if python scripts/validate_aps.py "$fixture"; then
+              echo "Expected validation failure: $fixture"
+              exit 1
+            fi
+          done
