@@ -16,9 +16,9 @@ Status: ACTIVE
 | G2 | Root machine-readable schema exists | schemas/aps/1.5-alpha/agent.schema.json | PARTIAL |
 | G2 | Reusable common definitions exist | common.schema.json | PARTIAL |
 | G2 | Positive and negative fixtures exist | tests/fixtures/aps/1.5-alpha | PARTIAL |
-| G2 | Automated schema validation executes in CI | .github/workflows/aps-conformance.yml + scripts/validate_aps.py | IMPLEMENTED / AWAITING CI EVIDENCE |
-| G2 | All 15 APS invariants have machine-testable representation or documented validator rule | specification/APS-1.5-alpha/INVARIANTS.md | IMPLEMENTED |
-| G3 | Registry persistence | pending | NOT STARTED |
+| G2 | Automated schema validation executes in CI | APS Conformance run 36981310129 | PASS / VERIFIED |
+| G2 | All 15 APS invariants have machine-testable representation or documented validator rule | specification/APS-1.5-alpha/INVARIANTS.md + required APS Conformance check | PASS / VERIFIED |
+| G3 | Registry persistence | ADR-0005 + schema/migration/integrity tests | IN PROGRESS |
 | G4 | PromptForge transformation | pending | NOT STARTED |
 | G5 | Evaluation framework | pending | NOT STARTED |
 | G6 | Generic + OpenAI compilation | pending | NOT STARTED |
