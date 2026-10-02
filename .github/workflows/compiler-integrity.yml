@@ -1,0 +1,48 @@
+name: Compiler Integrity
+
+on:
+  pull_request:
+    paths:
+      - "schemas/compiler/**"
+      - "scripts/compile_agent.py"
+      - "scripts/verify_compilation.py"
+      - "agents/**/agent.aps.json"
+      - "docs/architecture/ADR/0008-runtime-compiler.md"
+      - ".github/workflows/compiler-integrity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/compiler/**"
+      - "scripts/compile_agent.py"
+      - "scripts/verify_compilation.py"
+      - "agents/**/agent.aps.json"
+
+permissions:
+  contents: read
+
+jobs:
+  compiler-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-validation.txt
+      - name: Compile AGR-0001 generic
+        run: |
+          rm -rf .tmp/compiler-a .tmp/compiler-b
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target generic             --out-dir .tmp/compiler-a
+          python scripts/verify_compilation.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --artifact .tmp/compiler-a/generic.md             --manifest .tmp/compiler-a/generic.manifest.json
+      - name: Compile AGR-0001 OpenAI
+        run: |
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target openai             --out-dir .tmp/compiler-a
+          python scripts/verify_compilation.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --artifact .tmp/compiler-a/openai.md             --manifest .tmp/compiler-a/openai.manifest.json
+      - name: Verify deterministic normalized output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target generic             --out-dir .tmp/compiler-b
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target openai             --out-dir .tmp/compiler-b
+          cmp .tmp/compiler-a/generic.md .tmp/compiler-b/generic.md
+          cmp .tmp/compiler-a/openai.md .tmp/compiler-b/openai.md
