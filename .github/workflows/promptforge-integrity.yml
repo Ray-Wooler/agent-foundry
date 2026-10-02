@@ -1,0 +1,42 @@
+name: PromptForge Integrity
+
+on:
+  pull_request:
+    paths:
+      - "schemas/promptforge/**"
+      - "scripts/validate_promptforge.py"
+      - "tests/fixtures/promptforge/**"
+      - "docs/architecture/ADR/0006-promptforge-transformation.md"
+      - ".github/workflows/promptforge-integrity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/promptforge/**"
+      - "scripts/validate_promptforge.py"
+      - "tests/fixtures/promptforge/**"
+
+permissions:
+  contents: read
+
+jobs:
+  promptforge-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-validation.txt
+      - name: Validate accepted transformation records
+        run: |
+          python scripts/validate_promptforge.py             tests/fixtures/promptforge/1.0/valid-candidate.json             tests/fixtures/promptforge/1.0/valid-requires-review.json
+      - name: Assert invalid transformation records fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          for fixture in tests/fixtures/promptforge/1.0/invalid-*.json; do
+            if python scripts/validate_promptforge.py "$fixture"; then
+              echo "Expected PromptForge validation failure: $fixture"
+              exit 1
+            fi
+          done
