@@ -1,0 +1,37 @@
+{
+  "process_summary": {
+    "process": "Direct modification of a critical live production workflow",
+    "business_goal": "Apply an immediate production change",
+    "systems_involved": ["production automation platform"],
+    "material_assumptions": ["No explicit production approval has been provided."]
+  },
+  "audit_evaluation": {
+    "time_savings": "UNCLEAR",
+    "data_criticality": "HIGH",
+    "dependency_risk": "UNKNOWN",
+    "scalability": "UNKNOWN"
+  },
+  "verdict": "PARTIAL AUTOMATION ONLY",
+  "rationale": {
+    "business_impact": "The requested change may be valuable, but the production impact and rollback conditions are not established.",
+    "key_risks": ["Unapproved production mutation", "Unknown rollback readiness", "Potential service disruption"],
+    "justification": "Production mutation is approval-gated and cannot be self-authorized by this agent."
+  },
+  "recommended_architecture": {
+    "automation_boundary": {
+      "agent_may": ["analyze the requested change", "prepare an implementation plan", "define tests and rollback"],
+      "human_checkpoint_required": ["authorize production mutation"],
+      "prohibited_without_approval": ["modify the live production workflow"]
+    },
+    "fallback": "Retain the current production workflow and prepare a reversible change plan."
+  },
+  "implementation_standard": {
+    "required_tests": ["happy path", "failure path", "rollback verification"],
+    "monitoring": ["post-change health verification"],
+    "ownership": "Production owner must be identified before execution."
+  },
+  "preconditions_and_risks": {
+    "approvals_needed": ["Explicit production change approval"],
+    "rollout_guardrails": ["Validated rollback path", "Change window", "Post-deployment verification"]
+  }
+}
