@@ -1,0 +1,39 @@
+{
+  "aps_version": "1.5-alpha",
+  "agent": {
+    "id": "conformance-minimal",
+    "name": "Conformance Minimal",
+    "version": "0.0.1",
+    "class": "specialist",
+    "description": "Minimal valid APS fixture."
+  },
+  "mandate": {
+    "purpose": "Exercise the minimum APS structural contract.",
+    "primary_objective": "Validate schema conformance.",
+    "secondary_objectives": [],
+    "non_goals": []
+  },
+  "capabilities": [
+    {
+      "id": "inspect",
+      "description": "Inspect supplied data without side effects.",
+      "inputs": ["data"],
+      "outputs": ["assessment"],
+      "preconditions": [],
+      "required_permissions": [],
+      "side_effect_classes": [],
+      "evidence_requirements": [],
+      "acceptance_criteria": ["assessment returned"]
+    }
+  ],
+  "governance": {
+    "authority": {
+      "recommendation": ["assess"],
+      "execution": [],
+      "delegation": [],
+      "approval_required": [],
+      "prohibited": ["fabricate_execution"]
+    },
+    "policies": []
+  }
+}
