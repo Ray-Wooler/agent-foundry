@@ -1,0 +1,39 @@
+{
+  "aps_version": "1.5-alpha",
+  "agent": {
+    "id": "semantic-test",
+    "name": "Semantic Test",
+    "version": "0.0.1",
+    "class": "specialist"
+  },
+  "mandate": {
+    "purpose": "test",
+    "primary_objective": "test"
+  },
+  "capabilities": [],
+  "governance": {
+    "authority": {
+      "recommendation": [],
+      "execution": [
+        "read"
+      ],
+      "delegation": [],
+      "approval_required": [],
+      "prohibited": []
+    },
+    "policies": []
+  },
+  "operational": {
+    "tools": [
+      {
+        "id": "repo",
+        "operations": [
+          {
+            "name": "write",
+            "authority": "read"
+          }
+        ]
+      }
+    ]
+  }
+}
