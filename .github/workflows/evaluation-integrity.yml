@@ -31,6 +31,14 @@ jobs:
         run: python scripts/validate_evaluation.py --kind suite tests/fixtures/evaluation/1.0/agr-0001-boundary-suite.json
       - name: Validate accepted evaluation run
         run: python scripts/validate_evaluation.py --kind run tests/fixtures/evaluation/1.0/valid-run-pass.json
+      - name: Execute AGR-0001 boundary evaluation
+        run: |
+          mkdir -p agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001
+          python scripts/evaluate_agr0001_boundary.py \
+            --response agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001/response.json \
+            --out agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001/run.generated.json
+          python scripts/validate_evaluation.py --kind run \
+            agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001/run.generated.json
       - name: Assert invalid evaluation runs fail
         shell: bash
         run: |
