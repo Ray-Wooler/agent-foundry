@@ -118,12 +118,69 @@
         "claims": {
           "type": "array",
           "items": {
-            "allOf": [
-              {
-                "$ref": "common.schema.json#/$defs/claim"
-              }
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "statement",
+              "type",
+              "status"
             ],
             "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "enum": [
+                  "observation",
+                  "finding",
+                  "assessment",
+                  "attribution",
+                  "forecast",
+                  "recommendation"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "PROPOSED",
+                  "SUPPORTED",
+                  "DISPUTED",
+                  "SUPERSEDED",
+                  "WITHDRAWN"
+                ]
+              },
+              "evidence_for": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "evidence_against": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assumptions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "confidence": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "temporal_validity": {
+                "$ref": "common.schema.json#/$defs/temporalValidity"
+              },
               "corroborated": {
                 "type": "boolean"
               },
