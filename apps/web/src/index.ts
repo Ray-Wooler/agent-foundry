@@ -83,12 +83,42 @@ pre{white-space:pre-wrap;word-break:break-word;background:#101317;color:#e7edf4;
   <div id="reviewError" class="error"></div>
   <pre id="reviewState">No review recorded.</pre>
 </div>
+
+<div id="evaluationControls">
+  <h3>Evaluation orchestration</h3>
+  <p><button id="createEvaluationPlanButton" class="hidden">Create evaluation plan</button></p>
+  <div id="evaluationError" class="error"></div>
+  <pre id="evaluationState">No evaluation plan.</pre>
+  <div id="humanEvaluationControls" class="hidden">
+    <div class="grid">
+      <div><label>Human evaluation outcome</label><select id="humanEvalOutcome">
+        <option value="PASS">Pass</option>
+        <option value="PARTIAL">Partial</option>
+        <option value="FAIL">Fail</option>
+      </select></div>
+      <div><label>Human evaluation rationale</label><input id="humanEvalRationale" placeholder="Why does this evidence support the outcome?" /></div>
+    </div>
+    <p><button id="humanEvalButton">Submit human evaluation</button></p>
+  </div>
+  <div id="certReadinessControls" class="hidden">
+    <div class="grid">
+      <div><label>Certification readiness</label><select id="certReadinessDecision">
+        <option value="ELIGIBLE">Eligible</option>
+        <option value="NOT_ELIGIBLE">Not eligible</option>
+      </select></div>
+      <div><label>Readiness rationale</label><input id="certReadinessRationale" placeholder="Why is this version ready or not ready for certification?" /></div>
+    </div>
+    <p><button id="certReadinessButton">Record certification-readiness decision</button></p>
+  </div>
+</div>
 </section>
 </div>
 <script>
 const API=${JSON.stringify(apiBase)};
 let token=sessionStorage.getItem("foundry_token");
 let currentTransformationId=null;
+let currentEvaluationPlanId=null;
+let currentHumanExecutionId=null;
 const q=(id)=>document.getElementById(id);
 async function api(path,options={}){
   const headers={"content-type":"application/json",...(options.headers||{})};
@@ -143,6 +173,11 @@ async function poll(id){
       revisionLineage:data.revisionLineage,
       agentVersionStatus:data.agentVersionStatus
     },null,2);
+    if(data.agentVersionStatus==="CANDIDATE" && data.lifecycle?.evaluation_readiness_status==="READY"){
+      q("createEvaluationPlanButton").classList.remove("hidden");
+    } else {
+      q("createEvaluationPlanButton").classList.add("hidden");
+    }
     if(data.semanticReview?.decision==="REQUEST_CHANGES" && !data.revisionLineage?.some(x=>x.parent_transformation_id===id)){
       q("revisionButton").classList.remove("hidden");
     } else {
@@ -154,6 +189,69 @@ async function poll(id){
   }
   q("record").textContent="Polling timed out. Refresh status from the API.";
 }
+
+
+async function pollEvaluationPlan(id){
+  currentEvaluationPlanId=id;
+  for(let i=0;i<120;i++){
+    const data=await api("/v1/evaluation-plans/"+id);
+    q("evaluationState").textContent=JSON.stringify(data,null,2);
+    const awaiting=(data.executions||[]).find(x=>x.status==="AWAITING_HUMAN");
+    if(awaiting){
+      currentHumanExecutionId=awaiting.id;
+      q("humanEvaluationControls").classList.remove("hidden");
+    } else {
+      currentHumanExecutionId=null;
+      q("humanEvaluationControls").classList.add("hidden");
+    }
+    if(data.plan?.status==="COMPLETED" && !data.certificationReadinessDecision){
+      q("certReadinessControls").classList.remove("hidden");
+    } else {
+      q("certReadinessControls").classList.add("hidden");
+    }
+    if(!["READY","RUNNING","AWAITING_HUMAN"].includes(data.plan?.status)) return data;
+    if(data.plan?.status==="AWAITING_HUMAN") return data;
+    await new Promise(r=>setTimeout(r,1000));
+  }
+}
+q("createEvaluationPlanButton").onclick=async()=>{
+  if(!currentTransformationId)return;
+  q("evaluationError").textContent="";
+  try{
+    const data=await api("/v1/transformations/"+currentTransformationId+"/evaluation-plan",{method:"POST",body:"{}"});
+    q("createEvaluationPlanButton").classList.add("hidden");
+    await pollEvaluationPlan(data.planId);
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+q("humanEvalButton").onclick=async()=>{
+  if(!currentHumanExecutionId||!currentEvaluationPlanId)return;
+  q("evaluationError").textContent="";
+  try{
+    await api("/v1/evaluation-executions/"+currentHumanExecutionId+"/human-review",{
+      method:"POST",
+      body:JSON.stringify({
+        outcome:q("humanEvalOutcome").value,
+        rationale:q("humanEvalRationale").value,
+        evidence:["Reviewer evidence submitted through Agent Foundry UI"]
+      })
+    });
+    await pollEvaluationPlan(currentEvaluationPlanId);
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+q("certReadinessButton").onclick=async()=>{
+  if(!currentEvaluationPlanId)return;
+  q("evaluationError").textContent="";
+  try{
+    await api("/v1/evaluation-plans/"+currentEvaluationPlanId+"/certification-readiness",{
+      method:"POST",
+      body:JSON.stringify({
+        decision:q("certReadinessDecision").value,
+        rationale:q("certReadinessRationale").value
+      })
+    });
+    await pollEvaluationPlan(currentEvaluationPlanId);
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
 
 q("reviewButton").onclick=async()=>{
   if(!currentTransformationId)return;
