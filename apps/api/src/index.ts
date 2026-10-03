@@ -242,6 +242,26 @@ async function refreshEvaluationPlanClient(client: any, planId: string) {
   return { status:"COMPLETED", aggregateOutcome:aggregate.outcome };
 }
 
+
+async function authorityRoleForAgentVersion(
+  userId: string,
+  agentVersionId: string,
+): Promise<"OWNER" | "ADMIN" | null> {
+  const result = await query<{ role: "OWNER" | "ADMIN" }>(
+    `SELECT m.role
+     FROM promptforge_transformations t
+     JOIN projects p ON p.id=t.project_id
+     JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     WHERE t.agent_version_id=$1
+       AND m.user_id=$2
+       AND m.role IN ('OWNER','ADMIN')
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [agentVersionId,userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   if (req.method === "OPTIONS") return json(res, 204, {});
   const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -881,6 +901,286 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
+
+  const certificationMatch=/^\/v1\/evaluation-plans\/([0-9a-f-]+)\/certification$/.exec(url.pathname);
+  if(req.method==="POST" && certificationMatch) {
+    const planId=certificationMatch[1]!;
+    const plan=await query<{agent_version_id:string}>("SELECT agent_version_id FROM evaluation_plans WHERE id=$1",[planId]);
+    const agentVersionId=plan.rows[0]?.agent_version_id;
+    if(!agentVersionId) return json(res,404,{error:"evaluation_plan_not_found"});
+    const role=await authorityRoleForAgentVersion(user.id,agentVersionId);
+    if(!role) return json(res,403,{error:"certification_authority_required"});
+
+    const body=await readJson(req);
+    const decision=typeof body.decision==="string"?body.decision:"";
+    const rationale=typeof body.rationale==="string"?body.rationale.trim():"";
+    const evidence=Array.isArray(body.evidence)?body.evidence.filter((x):x is string=>typeof x==="string"&&x.trim().length>0):[];
+    if(!["CERTIFY","DENY"].includes(decision)) return json(res,400,{error:"invalid_certification_decision"});
+    if(rationale.length<3) return json(res,400,{error:"certification_rationale_required"});
+    if(decision==="CERTIFY" && !evidence.length) return json(res,400,{error:"certification_evidence_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const state=await client.query<{
+          agent_version_id:string; status:string; aggregate_outcome:string;
+          readiness_decision_id:string; readiness_decision:string;
+          certification_status:string; certification_readiness_status:string;
+          aps_sha256:string;
+        }>(
+          `SELECT p.agent_version_id,av.status,p.aggregate_outcome,
+                  d.id readiness_decision_id,d.decision readiness_decision,
+                  l.certification_status,l.certification_readiness_status,
+                  aps.sha256 aps_sha256
+           FROM evaluation_plans p
+           JOIN agent_versions av ON av.id=p.agent_version_id
+           JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+           JOIN certification_readiness_decisions d ON d.agent_version_id=av.id
+           JOIN aps_specifications aps ON aps.agent_version_id=av.id
+           WHERE p.id=$1
+           FOR UPDATE`,
+          [planId],
+        );
+        const item=state.rows[0];
+        if(!item) throw new Error("certification_context_missing");
+        if(item.status!=="EVALUATED") throw new Error("agent_not_evaluated");
+        if(item.readiness_decision!=="ELIGIBLE" || item.certification_readiness_status!=="ELIGIBLE" || item.certification_status!=="ELIGIBLE") {
+          throw new Error("agent_not_certification_eligible");
+        }
+        const existing=await client.query("SELECT 1 FROM certification_records WHERE agent_version_id=$1",[item.agent_version_id]);
+        if(existing.rowCount) throw new Error("certification_already_recorded");
+
+        const evidenceBundle={
+          evidence,
+          evaluationPlanId:planId,
+          readinessDecisionId:item.readiness_decision_id,
+          canonicalApsSha256:item.aps_sha256,
+          evaluationAggregate:item.aggregate_outcome,
+        };
+
+        const record=await client.query<{id:string;created_at:string}>(
+          `INSERT INTO certification_records(
+             agent_version_id,evaluation_plan_id,readiness_decision_id,
+             certifier_user_id,certifier_role,decision,rationale,evidence_bundle,
+             canonical_aps_sha256,evaluation_aggregate
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
+           RETURNING id,created_at::text`,
+          [
+            item.agent_version_id,planId,item.readiness_decision_id,user.id,role,
+            decision,rationale,JSON.stringify(evidenceBundle),item.aps_sha256,item.aggregate_outcome,
+          ],
+        );
+
+        if(decision==="CERTIFY") {
+          await client.query(
+            `UPDATE lifecycle_readiness
+             SET certification_decision_status='CERTIFIED',
+                 certification_status='CERTIFIED',
+                 release_approval_status='NOT_REVIEWED',
+                 release_status='NOT_ELIGIBLE',
+                 updated_at=now()
+             WHERE agent_version_id=$1`,
+            [item.agent_version_id],
+          );
+          await client.query(
+            "UPDATE agent_versions SET status='CERTIFIED' WHERE id=$1 AND status='EVALUATED'",
+            [item.agent_version_id],
+          );
+        } else {
+          await client.query(
+            `UPDATE lifecycle_readiness
+             SET certification_decision_status='DENIED',
+                 certification_status='NOT_ELIGIBLE',
+                 release_approval_status='NOT_REVIEWED',
+                 release_status='NOT_ELIGIBLE',
+                 updated_at=now()
+             WHERE agent_version_id=$1`,
+            [item.agent_version_id],
+          );
+        }
+
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,$2,'agent_version',$3,$4,$5::jsonb)`,
+          [
+            user.id,
+            decision==="CERTIFY"?"certification_granted":"certification_denied",
+            item.agent_version_id,
+            record.rows[0]!.id,
+            JSON.stringify({planId,decision,certifierRole:role,apsSha256:item.aps_sha256}),
+          ],
+        );
+
+        return {
+          certificationRecordId:record.rows[0]!.id,
+          decision,
+          agentVersionId:item.agent_version_id,
+          agentVersionStatus:decision==="CERTIFY"?"CERTIFIED":"EVALUATED",
+          certificationStatus:decision==="CERTIFY"?"CERTIFIED":"NOT_ELIGIBLE",
+          releaseApprovalStatus:"NOT_REVIEWED",
+          packagingStatus:"NOT_PACKAGED",
+          publicationStatus:"NOT_PUBLISHED",
+          frankaiRegistrationStatus:"NOT_REGISTERED",
+        };
+      });
+      return json(res,200,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["certification_context_missing","agent_not_evaluated","agent_not_certification_eligible","certification_already_recorded"].includes(message) || message.includes("certification requires")) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
+  const releaseApprovalMatch=/^\/v1\/agent-versions\/([0-9a-f-]+)\/release-approval$/.exec(url.pathname);
+  if(req.method==="POST" && releaseApprovalMatch) {
+    const agentVersionId=releaseApprovalMatch[1]!;
+    const role=await authorityRoleForAgentVersion(user.id,agentVersionId);
+    if(!role) return json(res,403,{error:"release_authority_required"});
+    const body=await readJson(req);
+    const decision=typeof body.decision==="string"?body.decision:"";
+    const rationale=typeof body.rationale==="string"?body.rationale.trim():"";
+    const intendedDistribution=typeof body.intendedDistribution==="string"?body.intendedDistribution.trim():"";
+    if(!["APPROVE","DENY"].includes(decision)) return json(res,400,{error:"invalid_release_approval_decision"});
+    if(rationale.length<3) return json(res,400,{error:"release_approval_rationale_required"});
+    if(intendedDistribution.length<3) return json(res,400,{error:"intended_distribution_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const context=await client.query<{
+          status:string; certification_record_id:string; certification_decision:string;
+          certification_decision_status:string; rights_status:string;
+        }>(
+          `SELECT av.status,c.id certification_record_id,c.decision certification_decision,
+                  l.certification_decision_status,s.rights_status
+           FROM agent_versions av
+           JOIN certification_records c ON c.agent_version_id=av.id
+           JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+           JOIN promptforge_transformations t ON t.agent_version_id=av.id
+           JOIN source_artifacts s ON s.id=t.source_artifact_id
+           WHERE av.id=$1
+           ORDER BY t.created_at DESC
+           LIMIT 1
+           FOR UPDATE OF av,l`,
+          [agentVersionId],
+        );
+        const item=context.rows[0];
+        if(!item) throw new Error("release_approval_context_missing");
+        if(item.status!=="CERTIFIED" || item.certification_decision!=="CERTIFY" || item.certification_decision_status!=="CERTIFIED") {
+          throw new Error("agent_not_certified");
+        }
+        const existing=await client.query("SELECT 1 FROM release_approval_records WHERE agent_version_id=$1",[agentVersionId]);
+        if(existing.rowCount) throw new Error("release_approval_already_recorded");
+
+        const record=await client.query<{id:string;created_at:string}>(
+          `INSERT INTO release_approval_records(
+             agent_version_id,certification_record_id,approver_user_id,approver_role,
+             decision,rationale,intended_distribution,rights_status
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING id,created_at::text`,
+          [
+            agentVersionId,item.certification_record_id,user.id,role,decision,rationale,
+            intendedDistribution,item.rights_status,
+          ],
+        );
+
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET release_approval_status=$1,
+               release_status=$2,
+               updated_at=now()
+           WHERE agent_version_id=$3`,
+          [
+            decision==="APPROVE"?"APPROVED":"DENIED",
+            decision==="APPROVE"?"ELIGIBLE":"NOT_ELIGIBLE",
+            agentVersionId,
+          ],
+        );
+
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,$2,'agent_version',$3,$4,$5::jsonb)`,
+          [
+            user.id,
+            decision==="APPROVE"?"release_approval_granted":"release_approval_denied",
+            agentVersionId,
+            record.rows[0]!.id,
+            JSON.stringify({decision,intendedDistribution,rightsStatus:item.rights_status,approverRole:role}),
+          ],
+        );
+
+        return {
+          releaseApprovalId:record.rows[0]!.id,
+          decision,
+          agentVersionId,
+          releaseApprovalStatus:decision==="APPROVE"?"APPROVED":"DENIED",
+          releaseStatus:decision==="APPROVE"?"ELIGIBLE":"NOT_ELIGIBLE",
+          packagingStatus:"NOT_PACKAGED",
+          publicationStatus:"NOT_PUBLISHED",
+          frankaiRegistrationStatus:"NOT_REGISTERED",
+          rightsStatus:item.rights_status,
+        };
+      });
+      return json(res,200,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["release_approval_context_missing","agent_not_certified","release_approval_already_recorded"].includes(message) || message.includes("release approval requires")) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
+  const authorityStateMatch=/^\/v1\/agent-versions\/([0-9a-f-]+)\/authority-state$/.exec(url.pathname);
+  if(req.method==="GET" && authorityStateMatch) {
+    const agentVersionId=authorityStateMatch[1]!;
+    const role=await authorityRoleForAgentVersion(user.id,agentVersionId);
+    if(!role) return json(res,403,{error:"insufficient_workspace_role"});
+
+    const state=await query(
+      `SELECT av.status agent_version_status,a.registry_id,av.version,
+              l.certification_status,l.certification_decision_status,l.release_approval_status,
+              l.release_status,l.packaging_status,l.publication_status,l.frankai_registration_status,
+              c.id certification_record_id,c.decision certification_decision,c.rationale certification_rationale,
+              cu.email certifier_email,cu.display_name certifier_name,c.certifier_role,
+              r.id release_approval_id,r.decision release_approval_decision,r.rationale release_approval_rationale,
+              r.intended_distribution,r.rights_status,
+              ru.email release_approver_email,ru.display_name release_approver_name,r.approver_role
+       FROM agent_versions av
+       JOIN agents a ON a.id=av.agent_id
+       JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+       LEFT JOIN certification_records c ON c.agent_version_id=av.id
+       LEFT JOIN app_users cu ON cu.id=c.certifier_user_id
+       LEFT JOIN release_approval_records r ON r.agent_version_id=av.id
+       LEFT JOIN app_users ru ON ru.id=r.approver_user_id
+       WHERE av.id=$1`,
+      [agentVersionId],
+    );
+    if(!state.rows[0]) return json(res,404,{error:"not_found"});
+
+    const packageRecords=await query(
+      `SELECT id,release_id,package_sha256,package_location,created_at::text
+       FROM release_package_records WHERE agent_version_id=$1 ORDER BY created_at`,
+      [agentVersionId],
+    );
+    const publication=await query(
+      `SELECT p.id,p.channel,p.external_reference,p.published_at::text,
+              f.id frankai_registration_id,f.registration_reference,f.registered_at::text
+       FROM release_package_records rp
+       JOIN publication_records p ON p.release_package_record_id=rp.id
+       LEFT JOIN frankai_registration_records f ON f.publication_record_id=p.id
+       WHERE rp.agent_version_id=$1
+       ORDER BY p.published_at`,
+      [agentVersionId],
+    );
+
+    return json(res,200,{
+      authorityState:state.rows[0],
+      releasePackages:packageRecords.rows,
+      publications:publication.rows,
+    });
+  }
+
   const transformationMatch = /^\/v1\/transformations\/([0-9a-f-]+)$/.exec(url.pathname);
   if (req.method === "GET" && transformationMatch) {
     const transformationId = transformationMatch[1]!;
@@ -938,9 +1238,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       semantic_approval_status: string; evaluation_readiness_status: string;
       evaluation_status: string; certification_readiness_status: string;
       certification_status: string; release_status: string;
+      certification_decision_status: string; release_approval_status: string;
+      packaging_status: string; publication_status: string; frankai_registration_status: string;
     }>(
       `SELECT semantic_approval_status,evaluation_readiness_status,evaluation_status,
-              certification_readiness_status,certification_status,release_status
+              certification_readiness_status,certification_status,release_status,
+              certification_decision_status,release_approval_status,packaging_status,
+              publication_status,frankai_registration_status
        FROM lifecycle_readiness WHERE agent_version_id=$1`,
       [item.agent_version_id],
     ) : null;
