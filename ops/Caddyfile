@@ -5,6 +5,9 @@
 foundry.frankai.online {
   encode zstd gzip
 
+  @metrics path /api/metrics
+  respond @metrics 404
+
   @api path /api/*
   handle @api {
     uri strip_prefix /api
