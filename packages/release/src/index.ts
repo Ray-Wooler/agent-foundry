@@ -139,6 +139,7 @@ export function buildPublicationPayload(input:{
   evaluationAggregate?:string;
   evaluationRequiredOutcome?:string;
   evaluationRunIds?:string[];
+  publishedAt?:string;
 }) {
   return {
     contractVersion:"1.0",
@@ -162,6 +163,7 @@ export function buildPublicationPayload(input:{
     evaluationAggregate:input.evaluationAggregate??"NOT_TESTED",
     evaluationRequiredOutcome:input.evaluationRequiredOutcome??"PASS",
     evaluationRunIds:input.evaluationRunIds??[],
+    published_at:input.publishedAt??new Date().toISOString(),
   };
 }
 
@@ -177,6 +179,7 @@ export function buildFrankAIRegistrationPayload(input:{
     || !Array.isArray(publication.capabilities)
     || publication.evaluationRequiredOutcome!=="PASS" || publication.evaluationAggregate!=="PASS"
     || !Array.isArray(publication.evaluationRunIds) || publication.evaluationRunIds.length===0
+    || typeof publication.published_at!=="string" || Number.isNaN(Date.parse(publication.published_at))
     || !["VERIFIED","RESTRICTED"].includes(publication.rightsStatus)) {
     throw new Error("registration publication payload is incomplete for FrankAI contract v1.0");
   }
@@ -201,6 +204,6 @@ export function buildFrankAIRegistrationPayload(input:{
       run_ids:input.publicationPayload.evaluationRunIds,
     },
     rights_status:input.publicationPayload.rightsStatus,
-    published_at:new Date().toISOString(),
+    published_at:publication.published_at,
   };
 }
