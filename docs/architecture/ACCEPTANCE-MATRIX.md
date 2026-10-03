@@ -28,3 +28,9 @@ Status: ACTIVE
 ## Merge Rule
 
 PR #1 must remain unmerged while G1/G2 acceptance work identified for the Phase Zero foundation is incomplete. A PASS must be backed by inspectable repository evidence.
+
+## Phase Zero Decision
+
+**PHASE ZERO COMPLETE**
+
+All gates G0-G8 have repository evidence. Required integrity workflows are enforced on protected `main` with strict branch freshness and no bypass actors.
