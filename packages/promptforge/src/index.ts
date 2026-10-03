@@ -175,6 +175,16 @@ function unique(values: string[]): string[] {
   return [...new Set(values.map((x) => x.trim()).filter(Boolean))];
 }
 
+const SAFE_RECOMMENDATION_SCOPES = new Set([
+  "analyse","analyze","classify","recommend","draft","design","identify_risk",
+  "propose_actions","summarize","research","review","compare","explain",
+]);
+
+function safeRecommendationScopes(values: string[]): string[] {
+  return unique(values.map((x) => slugify(x).replace(/-/g, "_")))
+    .filter((x) => SAFE_RECOMMENDATION_SCOPES.has(x));
+}
+
 function diffValue(before: unknown, after: unknown, path = "$"): Array<{ path: string; before: unknown; after: unknown }> {
   if (canonicalJson(before) === canonicalJson(after)) return [];
   if (
@@ -495,7 +505,7 @@ export class PromptForgeEngine {
       capabilities,
       governance: {
         authority: {
-          recommendation: unique(governance.recommendationScopes),
+          recommendation: safeRecommendationScopes(governance.recommendationScopes),
           execution: [],
           delegation: [],
           approval_required: unique([
