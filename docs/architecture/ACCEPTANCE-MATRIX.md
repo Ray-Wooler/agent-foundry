@@ -22,7 +22,7 @@ Status: ACTIVE
 | G4 | PromptForge transformation | PromptForge Integrity run 36986147469 + AGR-0001 golden transformation | PASS / VERIFIED / ENFORCED |
 | G5 | Evaluation framework | Evaluation Integrity run 36987197183 + AGR-0001 executed boundary evaluation | PASS / VERIFIED / ENFORCED |
 | G6 | Generic + OpenAI compilation | Compiler Integrity run 36988721985 + required Protect Main check | PASS / VERIFIED / ENFORCED |
-| G7 | Immutable release packaging | ADR-0009 + release manifest/package/verifier/CI | IN PROGRESS |
+| G7 | Immutable release packaging | Release Integrity run 37100708870 + ADR-0009 + release package/verifier/CI | PASS / VERIFIED / AWAITING ENFORCEMENT |
 | G8 | FrankAI integration | pending | NOT STARTED |
 
 ## Merge Rule
