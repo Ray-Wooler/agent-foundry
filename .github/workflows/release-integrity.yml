@@ -1,0 +1,50 @@
+name: Release Integrity
+
+on:
+  pull_request:
+    paths:
+      - "schemas/release/**"
+      - "scripts/package_release.py"
+      - "scripts/verify_release.py"
+      - "tests/fixtures/release/**"
+      - "agents/**/evaluations/**"
+      - "agents/**/agent.aps.json"
+      - "docs/architecture/ADR/0009-immutable-release-packaging.md"
+      - ".github/workflows/release-integrity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/release/**"
+      - "scripts/package_release.py"
+      - "scripts/verify_release.py"
+      - "tests/fixtures/release/**"
+
+permissions:
+  contents: read
+
+jobs:
+  release-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-validation.txt
+      - name: Compile AGR-0001 runtime artifacts
+        run: |
+          rm -rf .tmp/release .tmp/compile
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target generic             --out-dir .tmp/compile
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target openai             --out-dir .tmp/compile
+      - name: Build and verify rights-cleared release fixture
+        run: |
+          python scripts/package_release.py             --agent-id automation-governance-architect             --agent-version 1.0.0             --release-version 1.0.0-test             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --evaluation agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001/run.json             --rights-status VERIFIED             --provenance tests/fixtures/release/1.0/provenance-verified.json             --runtime .tmp/compile/generic.md             --runtime .tmp/compile/openai.md             --compilation-manifest .tmp/compile/generic.manifest.json             --compilation-manifest .tmp/compile/openai.manifest.json             --out-dir .tmp/release/verified
+          python scripts/verify_release.py --package-dir .tmp/release/verified
+      - name: Assert AGR-0001 unverified rights block distributable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if python scripts/package_release.py             --agent-id automation-governance-architect             --agent-version 1.0.0             --release-version 1.0.0             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --evaluation agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001/run.json             --rights-status UNVERIFIED             --runtime .tmp/compile/generic.md             --out-dir .tmp/release/blocked; then
+            echo "Expected release packaging to fail for UNVERIFIED rights"
+            exit 1
+          fi
