@@ -26,7 +26,7 @@ CREATE TABLE candidate_revision_lineage (
   child_transformation_id uuid NOT NULL UNIQUE REFERENCES promptforge_transformations(id) ON DELETE RESTRICT,
   parent_agent_version_id uuid NOT NULL REFERENCES agent_versions(id) ON DELETE RESTRICT,
   child_agent_version_id uuid REFERENCES agent_versions(id) ON DELETE RESTRICT,
-  requested_by_review_id uuid NOT NULL REFERENCES semantic_reviews(id) ON DELETE RESTRICT,
+  requested_by_review_id uuid NOT NULL UNIQUE REFERENCES semantic_reviews(id) ON DELETE RESTRICT,
   created_by_user_id uuid NOT NULL REFERENCES app_users(id) ON DELETE RESTRICT,
   created_at timestamptz NOT NULL DEFAULT now(),
   CHECK (parent_transformation_id <> child_transformation_id)
