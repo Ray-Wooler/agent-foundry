@@ -3,6 +3,12 @@ import { URL } from "node:url";
 import { digestSessionToken, issueSessionToken, normalizeEmail, verifyPassword } from "@agent-foundry/auth";
 import { query, transaction } from "@agent-foundry/db";
 import { sha256Text, type RightsStatus } from "@agent-foundry/domain";
+import {
+  applyHumanReview,
+  aggregateRequiredSuites,
+  type AssertionResult,
+  type EvaluationOutcome,
+} from "@agent-foundry/evaluation";
 import { bootstrapIdentity } from "./bootstrap.js";
 
 type SessionUser = { id: string; email: string; display_name: string };
@@ -132,6 +138,108 @@ async function reviewerRoleForTransformation(
     [transformationId, userId],
   );
   return result.rows[0]?.role ?? null;
+}
+
+
+async function reviewerRoleForEvaluationPlan(
+  userId: string,
+  planId: string,
+): Promise<Exclude<MembershipRole,"VIEWER"> | null> {
+  const result = await query<{ role: Exclude<MembershipRole,"VIEWER"> }>(
+    `SELECT m.role
+     FROM evaluation_plans ep
+     JOIN promptforge_transformations t ON t.agent_version_id=ep.agent_version_id
+     JOIN projects p ON p.id=t.project_id
+     JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     WHERE ep.id=$1 AND m.user_id=$2 AND m.role IN ('OWNER','ADMIN','EDITOR')
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [planId,userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
+async function reviewerRoleForEvaluationExecution(
+  userId: string,
+  executionId: string,
+): Promise<Exclude<MembershipRole,"VIEWER"> | null> {
+  const result = await query<{ role: Exclude<MembershipRole,"VIEWER"> }>(
+    `SELECT m.role
+     FROM evaluation_suite_executions e
+     JOIN evaluation_plans ep ON ep.id=e.plan_id
+     JOIN promptforge_transformations t ON t.agent_version_id=ep.agent_version_id
+     JOIN projects p ON p.id=t.project_id
+     JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     WHERE e.id=$1 AND m.user_id=$2 AND m.role IN ('OWNER','ADMIN','EDITOR')
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [executionId,userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
+async function refreshEvaluationPlanClient(client: any, planId: string) {
+  const plan = await client.query(
+    "SELECT agent_version_id FROM evaluation_plans WHERE id=$1 FOR UPDATE",
+    [planId],
+  );
+  const agentVersionId = plan.rows[0]?.agent_version_id as string | undefined;
+  if (!agentVersionId) throw new Error("evaluation_plan_not_found");
+
+  const rows = await client.query(
+    `SELECT ps.required,e.status,e.outcome
+     FROM evaluation_plan_suites ps
+     JOIN evaluation_suite_executions e
+       ON e.plan_id=ps.plan_id AND e.evaluation_suite_id=ps.evaluation_suite_id
+     WHERE ps.plan_id=$1
+     ORDER BY ps.ordinal`,
+    [planId],
+  );
+
+  const aggregate = aggregateRequiredSuites(rows.rows as Array<{
+    required:boolean; status:string; outcome:EvaluationOutcome|null;
+  }>);
+
+  if (aggregate.awaitingHuman) {
+    await client.query("UPDATE evaluation_plans SET status='AWAITING_HUMAN' WHERE id=$1",[planId]);
+    await client.query(
+      `UPDATE lifecycle_readiness
+       SET evaluation_status='AWAITING_HUMAN',updated_at=now()
+       WHERE agent_version_id=$1`,
+      [agentVersionId],
+    );
+    return { status:"AWAITING_HUMAN", aggregateOutcome:null };
+  }
+
+  if (!aggregate.complete) {
+    await client.query("UPDATE evaluation_plans SET status='RUNNING' WHERE id=$1",[planId]);
+    await client.query(
+      `UPDATE lifecycle_readiness
+       SET evaluation_status='RUNNING',updated_at=now()
+       WHERE agent_version_id=$1`,
+      [agentVersionId],
+    );
+    return { status:"RUNNING", aggregateOutcome:null };
+  }
+
+  await client.query(
+    `UPDATE evaluation_plans
+     SET status='COMPLETED',aggregate_outcome=$1,completed_at=now()
+     WHERE id=$2`,
+    [aggregate.outcome,planId],
+  );
+  await client.query(
+    `UPDATE lifecycle_readiness
+     SET evaluation_status=$1,certification_readiness_status='NOT_REVIEWED',
+         certification_status='NOT_ELIGIBLE',updated_at=now()
+     WHERE agent_version_id=$2`,
+    [aggregate.outcome==="PASS"?"PASSED":"FAILED",agentVersionId],
+  );
+  await client.query(
+    "UPDATE agent_versions SET status='EVALUATED' WHERE id=$1 AND status='VALIDATED'",
+    [agentVersionId],
+  );
+  return { status:"COMPLETED", aggregateOutcome:aggregate.outcome };
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -417,6 +525,362 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
+
+  if (req.method === "GET" && url.pathname === "/v1/evaluation-suites") {
+    const suites = await query<{
+      id:string; suite_key:string; version:string; name:string; definition:unknown;
+    }>(
+      `SELECT id,suite_key,version,name,definition
+       FROM evaluation_suites
+       ORDER BY suite_key,version`,
+    );
+    return json(res,200,{suites:suites.rows});
+  }
+
+  const evaluationPlanCreateMatch = /^\/v1\/transformations\/([0-9a-f-]+)\/evaluation-plan$/.exec(url.pathname);
+  if (req.method === "POST" && evaluationPlanCreateMatch) {
+    const transformationId=evaluationPlanCreateMatch[1]!;
+    const role=await reviewerRoleForTransformation(user.id,transformationId);
+    if(!role) return json(res,403,{error:"insufficient_workspace_role"});
+    const body=await readJson(req);
+    const requested=Array.isArray(body.suiteKeys)
+      ? body.suiteKeys.filter((x):x is string=>typeof x==="string")
+      : ["core-governance-v1","human-semantic-quality-v1"];
+    const suiteKeys=[...new Set(requested)];
+    if(!suiteKeys.length) return json(res,400,{error:"evaluation_suites_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const subject=await client.query(
+          `SELECT t.agent_version_id,av.status,l.semantic_approval_status,l.evaluation_readiness_status
+           FROM promptforge_transformations t
+           JOIN agent_versions av ON av.id=t.agent_version_id
+           JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+           WHERE t.id=$1
+           FOR UPDATE`,
+          [transformationId],
+        );
+        const item=subject.rows[0];
+        if(!item?.agent_version_id) throw new Error("candidate_not_ready");
+        if(item.status!=="CANDIDATE") throw new Error("candidate_not_candidate");
+        if(item.semantic_approval_status!=="APPROVED" || item.evaluation_readiness_status!=="READY") {
+          throw new Error("candidate_not_evaluation_ready");
+        }
+
+        const existing=await client.query("SELECT id FROM evaluation_plans WHERE agent_version_id=$1",[item.agent_version_id]);
+        if(existing.rowCount) throw new Error("evaluation_plan_exists");
+
+        const suites=await client.query(
+          `SELECT id,suite_key,version,name,definition
+           FROM evaluation_suites
+           WHERE suite_key=ANY($1::text[])
+           ORDER BY suite_key`,
+          [suiteKeys],
+        );
+        if(suites.rowCount!==suiteKeys.length) throw new Error("evaluation_suite_not_found");
+
+        const plan=await client.query(
+          `INSERT INTO evaluation_plans(agent_version_id,status,created_by_user_id)
+           VALUES ($1,'PLANNING',$2) RETURNING id`,
+          [item.agent_version_id,user.id],
+        );
+        const planId=plan.rows[0]!.id as string;
+
+        for(let i=0;i<suites.rows.length;i++){
+          const suite=suites.rows[i]!;
+          await client.query(
+            `INSERT INTO evaluation_plan_suites(plan_id,evaluation_suite_id,required,ordinal)
+             VALUES ($1,$2,true,$3)`,
+            [planId,suite.id,i],
+          );
+          await client.query(
+            `INSERT INTO evaluation_suite_executions(plan_id,evaluation_suite_id,status)
+             VALUES ($1,$2,'QUEUED')`,
+            [planId,suite.id],
+          );
+        }
+
+        await client.query("UPDATE evaluation_plans SET status='READY' WHERE id=$1",[planId]);
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET evaluation_status='PLANNED',updated_at=now()
+           WHERE agent_version_id=$1`,
+          [item.agent_version_id],
+        );
+        await client.query(
+          "UPDATE agent_versions SET status='VALIDATED' WHERE id=$1 AND status='CANDIDATE'",
+          [item.agent_version_id],
+        );
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
+           VALUES ($1,'evaluation_plan_ready','agent_version',$2,$3::jsonb)`,
+          [user.id,item.agent_version_id,JSON.stringify({planId,suiteKeys,reviewerRole:role})],
+        );
+
+        return {
+          planId,
+          agentVersionId:item.agent_version_id,
+          agentVersionStatus:"VALIDATED",
+          evaluationStatus:"PLANNED",
+          suites:suites.rows.map((s:any)=>({id:s.id,key:s.suite_key,version:s.version,name:s.name})),
+        };
+      });
+      return json(res,201,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["candidate_not_ready","candidate_not_candidate","candidate_not_evaluation_ready","evaluation_plan_exists","evaluation_suite_not_found"].includes(message)) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
+  const evaluationPlanMatch=/^\/v1\/evaluation-plans\/([0-9a-f-]+)$/.exec(url.pathname);
+  if(req.method==="GET" && evaluationPlanMatch) {
+    const planId=evaluationPlanMatch[1]!;
+    const role=await reviewerRoleForEvaluationPlan(user.id,planId);
+    if(!role) return json(res,403,{error:"insufficient_workspace_role"});
+
+    const plan=await query(
+      `SELECT p.id,p.agent_version_id,p.status,p.aggregate_outcome,
+              p.created_at::text,p.started_at::text,p.completed_at::text,
+              av.status agent_version_status,a.registry_id,av.version,
+              l.semantic_approval_status,l.evaluation_readiness_status,l.evaluation_status,
+              l.certification_readiness_status,l.certification_status,l.release_status
+       FROM evaluation_plans p
+       JOIN agent_versions av ON av.id=p.agent_version_id
+       JOIN agents a ON a.id=av.agent_id
+       JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+       WHERE p.id=$1`,
+      [planId],
+    );
+    if(!plan.rows[0]) return json(res,404,{error:"not_found"});
+
+    const executions=await query(
+      `SELECT e.id,e.status,e.outcome,e.evaluation_run_id,e.machine_evidence,
+              s.suite_key,s.version,s.name,ps.required,ps.ordinal,
+              h.id human_review_id,h.outcome human_outcome,h.rationale human_rationale,
+              hu.email human_reviewer_email,hu.display_name human_reviewer_name
+       FROM evaluation_plan_suites ps
+       JOIN evaluation_suites s ON s.id=ps.evaluation_suite_id
+       JOIN evaluation_suite_executions e
+         ON e.plan_id=ps.plan_id AND e.evaluation_suite_id=ps.evaluation_suite_id
+       LEFT JOIN human_evaluation_records h ON h.execution_id=e.id
+       LEFT JOIN app_users hu ON hu.id=h.reviewer_user_id
+       WHERE ps.plan_id=$1
+       ORDER BY ps.ordinal`,
+      [planId],
+    );
+
+    const readiness=await query(
+      `SELECT d.id,d.decision,d.rationale,d.aggregate_outcome,d.created_at::text,
+              u.email reviewer_email,u.display_name reviewer_name,d.reviewer_role
+       FROM certification_readiness_decisions d
+       JOIN app_users u ON u.id=d.reviewer_user_id
+       WHERE d.evaluation_plan_id=$1`,
+      [planId],
+    );
+
+    return json(res,200,{
+      plan:plan.rows[0],
+      executions:executions.rows,
+      certificationReadinessDecision:readiness.rows[0]??null,
+    });
+  }
+
+  const humanEvalMatch=/^\/v1\/evaluation-executions\/([0-9a-f-]+)\/human-review$/.exec(url.pathname);
+  if(req.method==="POST" && humanEvalMatch) {
+    const executionId=humanEvalMatch[1]!;
+    const role=await reviewerRoleForEvaluationExecution(user.id,executionId);
+    if(!role) return json(res,403,{error:"insufficient_workspace_role"});
+    const body=await readJson(req);
+    const outcome=typeof body.outcome==="string"?body.outcome:"";
+    const rationale=typeof body.rationale==="string"?body.rationale.trim():"";
+    const evidence=Array.isArray(body.evidence)?body.evidence.filter((x):x is string=>typeof x==="string"):[];
+    if(!["PASS","PARTIAL","FAIL"].includes(outcome)) return json(res,400,{error:"invalid_human_evaluation_outcome"});
+    if(rationale.length<3) return json(res,400,{error:"human_evaluation_rationale_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const execution=await client.query(
+          `SELECT e.id,e.plan_id,e.evaluation_suite_id,e.status,e.machine_evidence,
+                  p.agent_version_id
+           FROM evaluation_suite_executions e
+           JOIN evaluation_plans p ON p.id=e.plan_id
+           WHERE e.id=$1
+           FOR UPDATE`,
+          [executionId],
+        );
+        const item=execution.rows[0];
+        if(!item) throw new Error("evaluation_execution_not_found");
+        if(item.status!=="AWAITING_HUMAN") throw new Error("evaluation_execution_not_awaiting_human");
+
+        const existing=await client.query("SELECT 1 FROM human_evaluation_records WHERE execution_id=$1",[executionId]);
+        if(existing.rowCount) throw new Error("human_evaluation_already_recorded");
+
+        const prior=(item.machine_evidence??[]) as AssertionResult[];
+        const completed=applyHumanReview(prior,{
+          identity:user.email,role,rationale,
+        },outcome as "PASS"|"PARTIAL"|"FAIL");
+
+        const human=await client.query(
+          `INSERT INTO human_evaluation_records(
+             execution_id,reviewer_user_id,reviewer_role,outcome,rationale,evidence
+           ) VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+           RETURNING id,created_at::text`,
+          [executionId,user.id,role,outcome,rationale,JSON.stringify(evidence)],
+        );
+
+        const run=await client.query(
+          `INSERT INTO evaluation_runs(
+             agent_version_id,evaluation_suite_id,outcome,evidence,started_at,completed_at
+           ) VALUES ($1,$2,$3,$4::jsonb,now(),now())
+           RETURNING id`,
+          [
+            item.agent_version_id,item.evaluation_suite_id,outcome,
+            JSON.stringify({
+              runtime:{target:"human-review",identity:user.email},
+              results:completed,
+              evidence,
+            }),
+          ],
+        );
+
+        for(const assertion of completed) {
+          await client.query(
+            `INSERT INTO evaluation_results(evaluation_run_id,case_key,outcome,evidence)
+             VALUES ($1,$2,$3,$4::jsonb)`,
+            [
+              run.rows[0]!.id,
+              `${assertion.case_id}:${assertion.assertion_id}`,
+              assertion.outcome,
+              JSON.stringify({
+                assertionType:assertion.assertion_type,
+                required:assertion.required,
+                evidence:assertion.evidence,
+                reviewer:assertion.reviewer,
+              }),
+            ],
+          );
+        }
+
+        await client.query(
+          `UPDATE evaluation_suite_executions
+           SET status='COMPLETED',outcome=$1,evaluation_run_id=$2,
+               machine_evidence=$3::jsonb,completed_at=now()
+           WHERE id=$4`,
+          [outcome,run.rows[0]!.id,JSON.stringify(completed),executionId],
+        );
+
+        const aggregate=await refreshEvaluationPlanClient(client,item.plan_id);
+
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,'human_evaluation_recorded','evaluation_run',$2,$3,$4::jsonb)`,
+          [
+            user.id,run.rows[0]!.id,human.rows[0]!.id,
+            JSON.stringify({planId:item.plan_id,executionId,outcome,reviewerRole:role}),
+          ],
+        );
+
+        return {
+          humanEvaluationId:human.rows[0]!.id,
+          evaluationRunId:run.rows[0]!.id,
+          planId:item.plan_id,
+          outcome,
+          planStatus:aggregate.status,
+          aggregateOutcome:aggregate.aggregateOutcome,
+        };
+      });
+      return json(res,200,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["evaluation_execution_not_found","evaluation_execution_not_awaiting_human","human_evaluation_already_recorded"].includes(message)) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
+  const certReadinessMatch=/^\/v1\/evaluation-plans\/([0-9a-f-]+)\/certification-readiness$/.exec(url.pathname);
+  if(req.method==="POST" && certReadinessMatch) {
+    const planId=certReadinessMatch[1]!;
+    const role=await reviewerRoleForEvaluationPlan(user.id,planId);
+    if(!role) return json(res,403,{error:"insufficient_workspace_role"});
+    const body=await readJson(req);
+    const decision=typeof body.decision==="string"?body.decision:"";
+    const rationale=typeof body.rationale==="string"?body.rationale.trim():"";
+    if(!["ELIGIBLE","NOT_ELIGIBLE"].includes(decision)) return json(res,400,{error:"invalid_certification_readiness_decision"});
+    if(rationale.length<3) return json(res,400,{error:"certification_readiness_rationale_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const plan=await client.query(
+          `SELECT p.agent_version_id,p.status,p.aggregate_outcome,av.status agent_version_status
+           FROM evaluation_plans p
+           JOIN agent_versions av ON av.id=p.agent_version_id
+           WHERE p.id=$1
+           FOR UPDATE`,
+          [planId],
+        );
+        const item=plan.rows[0];
+        if(!item) throw new Error("evaluation_plan_not_found");
+        if(item.status!=="COMPLETED" || item.agent_version_status!=="EVALUATED") throw new Error("evaluation_not_complete");
+
+        const existing=await client.query("SELECT 1 FROM certification_readiness_decisions WHERE agent_version_id=$1",[item.agent_version_id]);
+        if(existing.rowCount) throw new Error("certification_readiness_already_recorded");
+
+        const readiness=await client.query(
+          `INSERT INTO certification_readiness_decisions(
+             agent_version_id,evaluation_plan_id,reviewer_user_id,reviewer_role,
+             decision,rationale,aggregate_outcome
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+           RETURNING id,created_at::text`,
+          [
+            item.agent_version_id,planId,user.id,role,decision,rationale,item.aggregate_outcome,
+          ],
+        );
+
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET certification_readiness_status=$1,
+               certification_status=$2,
+               updated_at=now()
+           WHERE agent_version_id=$3`,
+          [
+            decision,
+            decision==="ELIGIBLE"?"ELIGIBLE":"NOT_ELIGIBLE",
+            item.agent_version_id,
+          ],
+        );
+
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,'certification_readiness_decided','agent_version',$2,$3,$4::jsonb)`,
+          [
+            user.id,item.agent_version_id,readiness.rows[0]!.id,
+            JSON.stringify({planId,decision,aggregateOutcome:item.aggregate_outcome,reviewerRole:role}),
+          ],
+        );
+
+        return {
+          decisionId:readiness.rows[0]!.id,
+          agentVersionId:item.agent_version_id,
+          decision,
+          certificationStatus:decision==="ELIGIBLE"?"ELIGIBLE":"NOT_ELIGIBLE",
+          agentVersionStatus:"EVALUATED",
+        };
+      });
+      return json(res,200,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["evaluation_plan_not_found","evaluation_not_complete","certification_readiness_already_recorded"].includes(message) || message.includes("ELIGIBLE certification readiness requires PASS aggregate")) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
   const transformationMatch = /^\/v1\/transformations\/([0-9a-f-]+)$/.exec(url.pathname);
   if (req.method === "GET" && transformationMatch) {
     const transformationId = transformationMatch[1]!;
@@ -472,9 +936,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
     const lifecycle = item.agent_version_id ? await query<{
       semantic_approval_status: string; evaluation_readiness_status: string;
+      evaluation_status: string; certification_readiness_status: string;
       certification_status: string; release_status: string;
     }>(
-      `SELECT semantic_approval_status,evaluation_readiness_status,certification_status,release_status
+      `SELECT semantic_approval_status,evaluation_readiness_status,evaluation_status,
+              certification_readiness_status,certification_status,release_status
        FROM lifecycle_readiness WHERE agent_version_id=$1`,
       [item.agent_version_id],
     ) : null;

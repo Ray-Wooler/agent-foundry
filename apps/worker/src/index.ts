@@ -10,6 +10,12 @@ import {
   PromptForgeEngine,
   createPromptForgeProviderFromEnvironment,
 } from "@agent-foundry/promptforge";
+import {
+  executeEvaluationSuite,
+  aggregateRequiredSuites,
+  type EvaluationSuite,
+  type EvaluationOutcome,
+} from "@agent-foundry/evaluation";
 
 const pollMs = Number(process.env.WORKER_POLL_MS ?? 1000);
 const engine = new PromptForgeEngine(createPromptForgeProviderFromEnvironment());
@@ -236,9 +242,276 @@ async function processOne(item: Claimed) {
   }
 }
 
+
+type EvaluationClaim = {
+  execution_id: string;
+  plan_id: string;
+  evaluation_suite_id: string;
+  suite_definition: EvaluationSuite;
+  agent_version_id: string;
+  aps_document: unknown;
+  registry_id: string;
+  version: string;
+};
+
+async function refreshEvaluationPlan(planId: string) {
+  await transaction(async (client) => {
+    const plan = await client.query<{ agent_version_id: string }>(
+      "SELECT agent_version_id FROM evaluation_plans WHERE id=$1 FOR UPDATE",
+      [planId],
+    );
+    const agentVersionId = plan.rows[0]?.agent_version_id;
+    if (!agentVersionId) return;
+
+    const rows = await client.query<{
+      required: boolean; status: string; outcome: EvaluationOutcome | null;
+    }>(
+      `SELECT ps.required,e.status,e.outcome
+       FROM evaluation_plan_suites ps
+       JOIN evaluation_suite_executions e
+         ON e.plan_id=ps.plan_id AND e.evaluation_suite_id=ps.evaluation_suite_id
+       WHERE ps.plan_id=$1
+       ORDER BY ps.ordinal`,
+      [planId],
+    );
+
+    const aggregate = aggregateRequiredSuites(rows.rows);
+    if (aggregate.awaitingHuman) {
+      await client.query(
+        "UPDATE evaluation_plans SET status='AWAITING_HUMAN' WHERE id=$1",
+        [planId],
+      );
+      await client.query(
+        `UPDATE lifecycle_readiness
+         SET evaluation_status='AWAITING_HUMAN',updated_at=now()
+         WHERE agent_version_id=$1`,
+        [agentVersionId],
+      );
+      return;
+    }
+
+    if (!aggregate.complete) {
+      await client.query(
+        "UPDATE evaluation_plans SET status='RUNNING' WHERE id=$1",
+        [planId],
+      );
+      await client.query(
+        `UPDATE lifecycle_readiness
+         SET evaluation_status='RUNNING',updated_at=now()
+         WHERE agent_version_id=$1`,
+        [agentVersionId],
+      );
+      return;
+    }
+
+    await client.query(
+      `UPDATE evaluation_plans
+       SET status='COMPLETED',aggregate_outcome=$1,completed_at=now()
+       WHERE id=$2`,
+      [aggregate.outcome, planId],
+    );
+
+    await client.query(
+      `UPDATE lifecycle_readiness
+       SET evaluation_status=$1,
+           certification_readiness_status='NOT_REVIEWED',
+           certification_status='NOT_ELIGIBLE',
+           updated_at=now()
+       WHERE agent_version_id=$2`,
+      [aggregate.outcome === "PASS" ? "PASSED" : "FAILED", agentVersionId],
+    );
+
+    await client.query(
+      `UPDATE agent_versions
+       SET status='EVALUATED'
+       WHERE id=$1 AND status='VALIDATED'`,
+      [agentVersionId],
+    );
+
+    await client.query(
+      `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
+       VALUES ('system','evaluation_plan_completed','agent_version',$1,$2::jsonb)`,
+      [
+        agentVersionId,
+        JSON.stringify({ planId, aggregateOutcome: aggregate.outcome }),
+      ],
+    );
+  });
+}
+
+async function claimEvaluation(): Promise<EvaluationClaim | null> {
+  return transaction(async (client) => {
+    const claimed = await client.query<{
+      id: string; plan_id: string; evaluation_suite_id: string;
+    }>(
+      `WITH next AS (
+         SELECT e.id
+         FROM evaluation_suite_executions e
+         JOIN evaluation_plans p ON p.id=e.plan_id
+         WHERE e.status='QUEUED'
+           AND p.status IN ('READY','RUNNING')
+         ORDER BY e.created_at
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       UPDATE evaluation_suite_executions e
+       SET status='RUNNING',started_at=now()
+       FROM next
+       WHERE e.id=next.id
+       RETURNING e.id,e.plan_id,e.evaluation_suite_id`,
+    );
+    const row = claimed.rows[0];
+    if (!row) return null;
+
+    const context = await client.query<{
+      suite_definition: EvaluationSuite;
+      agent_version_id: string;
+      aps_document: unknown;
+      registry_id: string;
+      version: string;
+    }>(
+      `SELECT s.definition suite_definition,p.agent_version_id,aps.document aps_document,
+              a.registry_id,av.version
+       FROM evaluation_plans p
+       JOIN evaluation_suites s ON s.id=$2
+       JOIN agent_versions av ON av.id=p.agent_version_id
+       JOIN agents a ON a.id=av.agent_id
+       JOIN aps_specifications aps ON aps.agent_version_id=av.id
+       WHERE p.id=$1`,
+      [row.plan_id,row.evaluation_suite_id],
+    );
+    const item = context.rows[0];
+    if (!item) throw new Error("evaluation execution context missing");
+
+    await client.query(
+      `UPDATE evaluation_plans
+       SET status='RUNNING',started_at=COALESCE(started_at,now())
+       WHERE id=$1`,
+      [row.plan_id],
+    );
+    await client.query(
+      `UPDATE lifecycle_readiness
+       SET evaluation_status='RUNNING',updated_at=now()
+       WHERE agent_version_id=$1`,
+      [item.agent_version_id],
+    );
+
+    return {
+      execution_id: row.id,
+      plan_id: row.plan_id,
+      evaluation_suite_id: row.evaluation_suite_id,
+      ...item,
+    };
+  });
+}
+
+async function processEvaluation(item: EvaluationClaim) {
+  try {
+    const result = executeEvaluationSuite(item.suite_definition, item.aps_document);
+
+    if (result.status === "AWAITING_HUMAN") {
+      await query(
+        `UPDATE evaluation_suite_executions
+         SET status='AWAITING_HUMAN',outcome='NOT_TESTED',machine_evidence=$1::jsonb
+         WHERE id=$2`,
+        [JSON.stringify(result.results),item.execution_id],
+      );
+      await refreshEvaluationPlan(item.plan_id);
+      console.log(`evaluation execution ${item.execution_id} awaiting human review`);
+      return;
+    }
+
+    await transaction(async (client) => {
+      const run = await client.query<{ id: string }>(
+        `INSERT INTO evaluation_runs(
+           agent_version_id,evaluation_suite_id,outcome,evidence,started_at,completed_at
+         ) VALUES ($1,$2,$3,$4::jsonb,now(),now())
+         RETURNING id`,
+        [
+          item.agent_version_id,
+          item.evaluation_suite_id,
+          result.outcome,
+          JSON.stringify({
+            runtime:{target:"foundry-evaluator",identity:"evaluation-worker"},
+            results:result.results,
+          }),
+        ],
+      );
+
+      for (const assertion of result.results) {
+        await client.query(
+          `INSERT INTO evaluation_results(
+             evaluation_run_id,case_key,outcome,evidence
+           ) VALUES ($1,$2,$3,$4::jsonb)`,
+          [
+            run.rows[0]!.id,
+            `${assertion.case_id}:${assertion.assertion_id}`,
+            assertion.outcome,
+            JSON.stringify({
+              assertionType:assertion.assertion_type,
+              required:assertion.required,
+              evidence:assertion.evidence,
+              reviewer:assertion.reviewer,
+            }),
+          ],
+        );
+      }
+
+      await client.query(
+        `UPDATE evaluation_suite_executions
+         SET status='COMPLETED',outcome=$1,evaluation_run_id=$2,
+             machine_evidence=$3::jsonb,completed_at=now()
+         WHERE id=$4`,
+        [result.outcome,run.rows[0]!.id,JSON.stringify(result.results),item.execution_id],
+      );
+
+      await client.query(
+        `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
+         VALUES ('system','evaluation_suite_completed','evaluation_run',$1,$2::jsonb)`,
+        [
+          run.rows[0]!.id,
+          JSON.stringify({
+            planId:item.plan_id,
+            suiteId:item.suite_definition.suite_id,
+            outcome:result.outcome,
+          }),
+        ],
+      );
+    });
+
+    await refreshEvaluationPlan(item.plan_id);
+    console.log(`completed evaluation execution ${item.execution_id}`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`evaluation execution ${item.execution_id} failed`, error);
+    await query(
+      `UPDATE evaluation_suite_executions
+       SET status='FAILED',outcome='FAIL',machine_evidence=$1::jsonb,completed_at=now()
+       WHERE id=$2`,
+      [JSON.stringify([{error:reason.slice(0,1000)}]),item.execution_id],
+    );
+    await query(
+      "UPDATE evaluation_plans SET status='FAILED',aggregate_outcome='FAIL',completed_at=now() WHERE id=$1",
+      [item.plan_id],
+    );
+    await query(
+      `UPDATE lifecycle_readiness
+       SET evaluation_status='FAILED',updated_at=now()
+       WHERE agent_version_id=$1`,
+      [item.agent_version_id],
+    );
+  }
+}
+
 console.log(`agent-foundry-worker started; poll=${pollMs}ms provider=${process.env.PROMPTFORGE_PROVIDER ?? "deterministic"}`);
 
 while (true) {
+  const evaluation = await claimEvaluation();
+  if (evaluation) {
+    await processEvaluation(evaluation);
+    continue;
+  }
+
   const item = await claim();
   if (item) {
     await processOne(item);
