@@ -471,6 +471,11 @@ restore();
 </body></html>`;
 
 createServer((req,res)=>{
+  if(req.url==="/health"||req.url==="/ready"){
+    res.writeHead(200,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});
+    res.end(JSON.stringify({status:"ok",service:"agent-foundry-web",version:process.env.APP_VERSION??"dev"}));
+    return;
+  }
   if(req.url!=="/" && req.url!=="/index.html"){res.writeHead(404);res.end("Not found");return;}
   res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store"});
   res.end(html);
