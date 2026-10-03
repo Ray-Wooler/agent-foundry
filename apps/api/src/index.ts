@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL } from "node:url";
 import { digestSessionToken, issueSessionToken, normalizeEmail, verifyPassword } from "@agent-foundry/auth";
 import { query, transaction } from "@agent-foundry/db";
-import { sha256Text, type RightsStatus } from "@agent-foundry/domain";
+import { canonicalJson, sha256Text, type RightsStatus } from "@agent-foundry/domain";
 import {
   buildReleaseBundle,
   buildPublicationPayload,
@@ -1346,7 +1346,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         );
 
         const packageObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/releases/${releaseVersion}/package.json`;
-        const packageStorageSha256=sha256Text(JSON.stringify(built.content));
+        const packageStorageBody=canonicalJson(built.content);
+        const packageStorageSha256=sha256Text(packageStorageBody);
         const artifact=await client.query<{id:string}>(
           `INSERT INTO artifact_objects(
              workspace_id,agent_version_id,kind,object_key,sha256,media_type,byte_size
@@ -1354,7 +1355,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            RETURNING id`,
           [
             item.workspace_id,agentVersionId,packageObjectKey,packageStorageSha256,
-            Buffer.byteLength(JSON.stringify(built.content)),
+            Buffer.byteLength(packageStorageBody),
           ],
         );
         await client.query(
@@ -1496,7 +1497,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         );
 
         const publicationObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/publications/${record.rows[0]!.id}.json`;
-        const publicationStorageSha256=sha256Text(JSON.stringify(payload));
+        const publicationStorageBody=canonicalJson(payload);
+        const publicationStorageSha256=sha256Text(publicationStorageBody);
         const publicationArtifact=await client.query<{id:string}>(
           `INSERT INTO artifact_objects(
              workspace_id,agent_version_id,kind,object_key,sha256,media_type,byte_size
@@ -1504,7 +1506,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            RETURNING id`,
           [
             item.workspace_id,item.agent_version_id,publicationObjectKey,publicationStorageSha256,
-            Buffer.byteLength(JSON.stringify(payload)),
+            Buffer.byteLength(publicationStorageBody),
           ],
         );
         await client.query(
@@ -1656,7 +1658,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
         const registrationEvidence={request:payload,response:responsePayload,registrationReference};
         const registrationObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/frankai/${record.rows[0]!.id}.json`;
-        const registrationStorageSha256=sha256Text(JSON.stringify(registrationEvidence));
+        const registrationStorageBody=canonicalJson(registrationEvidence);
+        const registrationStorageSha256=sha256Text(registrationStorageBody);
         const registrationArtifact=await client.query<{id:string}>(
           `INSERT INTO artifact_objects(
              workspace_id,agent_version_id,kind,object_key,sha256,media_type,byte_size
@@ -1664,7 +1667,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            RETURNING id`,
           [
             item.workspace_id,item.agent_version_id,registrationObjectKey,registrationStorageSha256,
-            Buffer.byteLength(JSON.stringify(registrationEvidence)),
+            Buffer.byteLength(registrationStorageBody),
           ],
         );
         await client.query(
