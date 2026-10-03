@@ -438,33 +438,40 @@ export type PromptForgeEngineResult = {
 export class PromptForgeEngine {
   constructor(private readonly provider: ModelProvider) {}
 
-  async transform(input: CandidateRequest): Promise<PromptForgeEngineResult> {
+  async transform(
+    input: CandidateRequest,
+    onStage?: (stage: StageEvidence) => Promise<void>,
+  ): Promise<PromptForgeEngineResult> {
     const sourceSha256 = sha256Text(input.sourcePrompt);
     const stages: StageEvidence[] = [];
+    const recordStage = async (stage: StageEvidence) => {
+      stages.push(stage);
+      if (onStage) await onStage(stage);
+    };
 
     const intentResult = await this.provider.generate<IntentAnalysis>(
       "INTENT_ANALYSIS", input.sourcePrompt, { name: input.name, agentClass: input.agentClass },
     );
     const intent = normalizeIntent(intentResult.data);
-    stages.push({ stage: "INTENT_ANALYSIS", output: intent, metadata: intentResult.metadata });
+    await recordStage({ stage: "INTENT_ANALYSIS", output: intent, metadata: intentResult.metadata });
 
     const defectResult = await this.provider.generate<DefectAnalysis>(
       "DEFECT_ANALYSIS", input.sourcePrompt, { intent },
     );
     const defects = normalizeDefects(defectResult.data);
-    stages.push({ stage: "DEFECT_ANALYSIS", output: defects, metadata: defectResult.metadata });
+    await recordStage({ stage: "DEFECT_ANALYSIS", output: defects, metadata: defectResult.metadata });
 
     const capabilityResult = await this.provider.generate<CapabilityAnalysis>(
       "CAPABILITY_EXTRACTION", input.sourcePrompt, { intent, defects },
     );
     const capabilityAnalysis = normalizeCapabilities(capabilityResult.data);
-    stages.push({ stage: "CAPABILITY_EXTRACTION", output: capabilityAnalysis, metadata: capabilityResult.metadata });
+    await recordStage({ stage: "CAPABILITY_EXTRACTION", output: capabilityAnalysis, metadata: capabilityResult.metadata });
 
     const governanceResult = await this.provider.generate<GovernanceAnalysis>(
       "GOVERNANCE_CONSTRUCTION", input.sourcePrompt, { intent, defects, capabilities: capabilityAnalysis },
     );
     const governance = normalizeGovernance(governanceResult.data);
-    stages.push({ stage: "GOVERNANCE_CONSTRUCTION", output: governance, metadata: governanceResult.metadata });
+    await recordStage({ stage: "GOVERNANCE_CONSTRUCTION", output: governance, metadata: governanceResult.metadata });
 
     const capabilities = capabilityAnalysis.capabilities.map((capability) => ({
       id: capability.id,
@@ -559,7 +566,7 @@ export class PromptForgeEngine {
       { intent, defects, capabilities: capabilityAnalysis, governance, candidateDiff, validation },
     );
     const explanation = normalizeExplanation(explanationResult.data);
-    stages.push({ stage: "REVIEW_EXPLANATION", output: explanation, metadata: explanationResult.metadata });
+    await recordStage({ stage: "REVIEW_EXPLANATION", output: explanation, metadata: explanationResult.metadata });
 
     const transformationRecord = {
       contract_version: "2.0",
