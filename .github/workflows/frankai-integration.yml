@@ -1,0 +1,60 @@
+name: FrankAI Integration
+
+on:
+  pull_request:
+    paths:
+      - "schemas/integration/frankai/**"
+      - "scripts/build_frankai_publication.py"
+      - "scripts/verify_frankai_publication.py"
+      - "scripts/package_release.py"
+      - "scripts/compile_agent.py"
+      - "tests/fixtures/release/**"
+      - "agents/**/agent.aps.json"
+      - "agents/**/evaluations/**"
+      - "docs/architecture/ADR/0010-frankai-integration.md"
+      - ".github/workflows/frankai-integration.yml"
+  push:
+    branches: [main]
+    paths:
+      - "schemas/integration/frankai/**"
+      - "scripts/build_frankai_publication.py"
+      - "scripts/verify_frankai_publication.py"
+
+permissions:
+  contents: read
+
+jobs:
+  frankai-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-validation.txt
+      - name: Prepare rights-cleared release fixture
+        run: |
+          rm -rf .tmp/integration .tmp/compile
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target generic             --out-dir .tmp/compile
+          python scripts/compile_agent.py             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --target openai             --out-dir .tmp/compile
+          python scripts/package_release.py             --agent-id automation-governance-architect             --agent-version 1.0.0             --release-version 1.0.0-test             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --evaluation agents/AGR-0001-automation-governance-architect/evaluations/EVR-AGR-0001-0001/run.json             --rights-status VERIFIED             --provenance tests/fixtures/release/1.0/provenance-verified.json             --runtime .tmp/compile/generic.md             --runtime .tmp/compile/openai.md             --compilation-manifest .tmp/compile/generic.manifest.json             --compilation-manifest .tmp/compile/openai.manifest.json             --out-dir .tmp/integration/release
+      - name: Build and verify FrankAI publication payload
+        run: |
+          python scripts/build_frankai_publication.py             --release-manifest .tmp/integration/release/release.manifest.json             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --out .tmp/integration/publish.json
+          python scripts/verify_frankai_publication.py             --payload .tmp/integration/publish.json             --release-manifest .tmp/integration/release/release.manifest.json
+      - name: Assert non-released state is blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .tmp/integration/release/release.manifest.json .tmp/integration/not-released.json
+          python - <<'PY'
+import json
+p=".tmp/integration/not-released.json"
+d=json.load(open(p))
+d["status"]="CERTIFIED"
+json.dump(d,open(p,"w"),indent=2)
+PY
+          if python scripts/build_frankai_publication.py             --release-manifest .tmp/integration/not-released.json             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --out .tmp/integration/blocked.json; then
+            echo "Expected non-RELEASED publication to fail"
+            exit 1
+          fi
