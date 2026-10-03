@@ -119,6 +119,21 @@ async function canEditProject(userId: string, projectId: string): Promise<boolea
   return Boolean(result.rowCount);
 }
 
+async function reviewerRoleForTransformation(
+  userId: string,
+  transformationId: string,
+): Promise<Exclude<MembershipRole,"VIEWER"> | null> {
+  const result = await query<{ role: Exclude<MembershipRole,"VIEWER"> }>(
+    `SELECT m.role
+     FROM promptforge_transformations t
+     JOIN projects p ON p.id=t.project_id
+     JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     WHERE t.id=$1 AND m.user_id=$2 AND m.role IN ('OWNER','ADMIN','EDITOR')`,
+    [transformationId, userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   if (req.method === "OPTIONS") return json(res, 204, {});
   const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -224,6 +239,176 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return json(res, 202, { ...result, status: "QUEUED", sourceSha256 });
   }
 
+  const reviewMatch = /^\/v1\/transformations\/([0-9a-f-]+)\/review$/.exec(url.pathname);
+  if (req.method === "POST" && reviewMatch) {
+    const transformationId = reviewMatch[1]!;
+    const role = await reviewerRoleForTransformation(user.id, transformationId);
+    if (!role) return json(res, 403, { error: "insufficient_workspace_role" });
+
+    const body = await readJson(req);
+    const decision = typeof body.decision === "string" ? body.decision : "";
+    const rationale = typeof body.rationale === "string" ? body.rationale.trim() : "";
+    const requestedChanges = typeof body.requestedChanges === "string" ? body.requestedChanges.trim() : null;
+    if (!["APPROVE","REJECT","REQUEST_CHANGES"].includes(decision)) {
+      return json(res, 400, { error: "invalid_review_decision" });
+    }
+    if (rationale.length < 3) return json(res, 400, { error: "review_rationale_required" });
+    if (decision === "REQUEST_CHANGES" && !requestedChanges) {
+      return json(res, 400, { error: "requested_changes_required" });
+    }
+
+    try {
+      const result = await transaction(async (client) => {
+        const candidate = await client.query<{
+          agent_version_id: string; candidate_sha256: string; status: string;
+        }>(
+          `SELECT agent_version_id,candidate_sha256,status
+           FROM promptforge_transformations
+           WHERE id=$1
+           FOR UPDATE`,
+          [transformationId],
+        );
+        const item = candidate.rows[0];
+        if (!item?.agent_version_id || !item.candidate_sha256) throw new Error("candidate_not_ready");
+        if (item.status !== "REQUIRES_REVIEW") throw new Error("candidate_not_reviewable");
+
+        const review = await client.query<{ id: string; created_at: string }>(
+          `INSERT INTO semantic_reviews(
+             transformation_id,agent_version_id,candidate_sha256,
+             reviewer_user_id,reviewer_role,decision,rationale,requested_changes
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           RETURNING id,created_at::text`,
+          [
+            transformationId,item.agent_version_id,item.candidate_sha256,
+            user.id,role,decision,rationale,
+            decision === "REQUEST_CHANGES" ? requestedChanges : null,
+          ],
+        );
+
+        const semanticStatus = decision === "APPROVE"
+          ? "APPROVED" : decision === "REJECT" ? "REJECTED" : "CHANGES_REQUESTED";
+        const evalReady = decision === "APPROVE" ? "READY" : "NOT_READY";
+
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET semantic_approval_status=$1,evaluation_readiness_status=$2,
+               certification_status='NOT_ELIGIBLE',release_status='NOT_ELIGIBLE',updated_at=now()
+           WHERE agent_version_id=$3`,
+          [semanticStatus,evalReady,item.agent_version_id],
+        );
+
+        if (decision === "APPROVE") {
+          await client.query(
+            `UPDATE agent_versions
+             SET content_sha256=$1,status='CANDIDATE',promoted_at=now()
+             WHERE id=$2 AND status='DRAFT'`,
+            [item.candidate_sha256,item.agent_version_id],
+          );
+        }
+
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,$2,'agent_version',$3,$4,$5::jsonb)`,
+          [
+            user.id,
+            decision === "APPROVE" ? "semantic_review_approved"
+              : decision === "REJECT" ? "semantic_review_rejected"
+              : "semantic_review_changes_requested",
+            item.agent_version_id,review.rows[0]!.id,
+            JSON.stringify({transformationId,candidateSha256:item.candidate_sha256,reviewerRole:role}),
+          ],
+        );
+
+        return {
+          reviewId: review.rows[0]!.id,
+          reviewedAt: review.rows[0]!.created_at,
+          agentVersionId: item.agent_version_id,
+          semanticApprovalStatus: semanticStatus,
+          evaluationReadinessStatus: evalReady,
+          certificationStatus: "NOT_ELIGIBLE",
+          releaseStatus: "NOT_ELIGIBLE",
+          agentVersionStatus: decision === "APPROVE" ? "CANDIDATE" : "DRAFT",
+        };
+      });
+      return json(res, 200, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("duplicate key")) return json(res, 409, { error: "review_already_recorded" });
+      if (message === "candidate_not_ready" || message === "candidate_not_reviewable") {
+        return json(res, 409, { error: message });
+      }
+      throw error;
+    }
+  }
+
+  const revisionMatch = /^\/v1\/transformations\/([0-9a-f-]+)\/revisions$/.exec(url.pathname);
+  if (req.method === "POST" && revisionMatch) {
+    const parentTransformationId = revisionMatch[1]!;
+    const role = await reviewerRoleForTransformation(user.id, parentTransformationId);
+    if (!role) return json(res, 403, { error: "insufficient_workspace_role" });
+
+    try {
+      const result = await transaction(async (client) => {
+        const parent = await client.query<{
+          project_id: string; source_artifact_id: string; requested_name: string;
+          requested_class: string; source_sha256: string; agent_version_id: string;
+          rights_status: string; review_id: string; requested_changes: string;
+        }>(
+          `SELECT t.project_id,t.source_artifact_id,t.requested_name,t.requested_class,
+                  t.source_sha256,t.agent_version_id,s.rights_status,
+                  r.id review_id,r.requested_changes
+           FROM promptforge_transformations t
+           JOIN source_artifacts s ON s.id=t.source_artifact_id
+           JOIN semantic_reviews r ON r.transformation_id=t.id
+           WHERE t.id=$1 AND r.decision='REQUEST_CHANGES'
+           FOR UPDATE`,
+          [parentTransformationId],
+        );
+        const item = parent.rows[0];
+        if (!item?.agent_version_id || !item.requested_changes) throw new Error("change_request_required");
+
+        const child = await client.query<{ id: string }>(
+          `INSERT INTO promptforge_transformations(
+             project_id,source_artifact_id,requested_name,requested_class,status,
+             configuration,source_sha256,created_by_user_id
+           ) VALUES ($1,$2,$3,$4,'QUEUED',$5::jsonb,$6,$7)
+           RETURNING id`,
+          [
+            item.project_id,item.source_artifact_id,item.requested_name,item.requested_class,
+            JSON.stringify({
+              rightsStatus:item.rights_status,apsVersion:"1.5-alpha",
+              revisionRequest:item.requested_changes,parentTransformationId,
+              parentAgentVersionId:item.agent_version_id,requestedByReviewId:item.review_id,
+            }),
+            item.source_sha256,user.id,
+          ],
+        );
+
+        await client.query(
+          `INSERT INTO candidate_revision_lineage(
+             parent_transformation_id,child_transformation_id,parent_agent_version_id,
+             requested_by_review_id,created_by_user_id
+           ) VALUES ($1,$2,$3,$4,$5)`,
+          [parentTransformationId,child.rows[0]!.id,item.agent_version_id,item.review_id,user.id],
+        );
+
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,'candidate_revision_queued','promptforge_transformation',$2,$3,$4::jsonb)`,
+          [user.id,child.rows[0]!.id,item.review_id,JSON.stringify({parentTransformationId,parentAgentVersionId:item.agent_version_id})],
+        );
+
+        return { transformationId: child.rows[0]!.id, status: "QUEUED", parentTransformationId };
+      });
+      return json(res, 202, result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("duplicate key")) return json(res, 409, { error: "revision_already_created" });
+      if (message === "change_request_required") return json(res, 409, { error: message });
+      throw error;
+    }
+  }
+
   const transformationMatch = /^\/v1\/transformations\/([0-9a-f-]+)$/.exec(url.pathname);
   if (req.method === "GET" && transformationMatch) {
     const transformationId = transformationMatch[1]!;
@@ -232,10 +417,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       record: unknown; candidate_sha256: string | null; failure_reason: string | null;
       document: unknown | null; registry_id: string | null; version: string | null;
       provider: string | null; model: string | null; validation_status: string | null;
+      agent_version_id: string | null; agent_version_status: string | null;
     }>(
       `SELECT t.id,t.status,t.requested_name,t.requested_class,t.record,t.candidate_sha256,t.failure_reason,
-              t.provider,t.model,t.validation_status,
-              aps.document,a.registry_id,av.version
+              t.provider,t.model,t.validation_status,t.agent_version_id,
+              aps.document,a.registry_id,av.version,av.status agent_version_status
        FROM promptforge_transformations t
        JOIN projects p ON p.id=t.project_id
        JOIN workspace_memberships m ON m.workspace_id=p.workspace_id AND m.user_id=$2
@@ -263,6 +449,40 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
        ORDER BY created_at,stage`,
       [transformationId],
     );
+    const semanticReview = item.agent_version_id ? await query<{
+      id: string; decision: string; rationale: string; requested_changes: string | null;
+      reviewer_user_id: string; reviewer_role: string; reviewer_email: string;
+      reviewer_name: string; created_at: string;
+    }>(
+      `SELECT r.id,r.decision,r.rationale,r.requested_changes,r.reviewer_user_id,r.reviewer_role,
+              u.email reviewer_email,u.display_name reviewer_name,r.created_at::text
+       FROM semantic_reviews r
+       JOIN app_users u ON u.id=r.reviewer_user_id
+       WHERE r.agent_version_id=$1`,
+      [item.agent_version_id],
+    ) : null;
+
+    const lifecycle = item.agent_version_id ? await query<{
+      semantic_approval_status: string; evaluation_readiness_status: string;
+      certification_status: string; release_status: string;
+    }>(
+      `SELECT semantic_approval_status,evaluation_readiness_status,certification_status,release_status
+       FROM lifecycle_readiness WHERE agent_version_id=$1`,
+      [item.agent_version_id],
+    ) : null;
+
+    const lineage = await query<{
+      parent_transformation_id: string; child_transformation_id: string;
+      parent_agent_version_id: string; child_agent_version_id: string | null;
+      requested_by_review_id: string;
+    }>(
+      `SELECT parent_transformation_id,child_transformation_id,parent_agent_version_id,
+              child_agent_version_id,requested_by_review_id
+       FROM candidate_revision_lineage
+       WHERE parent_transformation_id=$1 OR child_transformation_id=$1
+       ORDER BY created_at`,
+      [transformationId],
+    );
     return json(res, 200, {
       id: item.id,
       status: item.status,
@@ -275,6 +495,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       provider: item.provider,
       model: item.model,
       validationStatus: item.validation_status,
+      agentVersionStatus: item.agent_version_status,
+      semanticReview: semanticReview?.rows[0] ?? null,
+      lifecycle: lifecycle?.rows[0] ?? null,
+      revisionLineage: lineage.rows,
       candidate: item.document,
       transformationRecord: item.record,
       reviewPackage: review.rows[0] ? {
