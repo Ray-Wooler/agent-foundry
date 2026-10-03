@@ -1213,13 +1213,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         if(existingPackage.rowCount) throw new Error("package_already_exists");
 
         const context=await client.query<{
-          registry_id:string; version:string; status:string;
+          registry_id:string; version:string; status:string; workspace_id:string;
           aps_document:any; aps_sha256:string;
           evaluation_plan_id:string; aggregate_outcome:string;
           certification_record_id:string; certification_evidence:any; certifier_role:string;
           release_approval_id:string; rights_status:string; intended_distribution:string; approver_role:string;
         }>(
-          `SELECT a.registry_id,av.version,av.status,
+          `SELECT a.registry_id,av.version,av.status,pj.workspace_id,
                   aps.document aps_document,aps.sha256 aps_sha256,
                   ep.id evaluation_plan_id,ep.aggregate_outcome,
                   cr.id certification_record_id,cr.evidence_bundle certification_evidence,cr.certifier_role,
@@ -1231,6 +1231,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            JOIN certification_records cr ON cr.agent_version_id=av.id AND cr.decision='CERTIFY'
            JOIN release_approval_records ra ON ra.agent_version_id=av.id AND ra.decision='APPROVE'
            JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+           JOIN promptforge_transformations pt ON pt.agent_version_id=av.id
+           JOIN projects pj ON pj.id=pt.project_id
            WHERE av.id=$1
              AND av.status='CERTIFIED'
              AND l.release_approval_status='APPROVED'
@@ -1288,6 +1290,32 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
             agentVersionId,item.release_approval_id,release.rows[0]!.id,packageSha256,
             "database://release_package_records",idempotencyKey,
             JSON.stringify(manifest),JSON.stringify(built.content),user.id,
+          ],
+        );
+
+        const packageObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/releases/${releaseVersion}/package.json`;
+        const packageStorageSha256=sha256Text(JSON.stringify(built.content));
+        const artifact=await client.query<{id:string}>(
+          `INSERT INTO artifact_objects(
+             workspace_id,agent_version_id,kind,object_key,sha256,media_type,byte_size
+           ) VALUES ($1,$2,'RELEASE_PACKAGE',$3,$4,'application/json',$5)
+           RETURNING id`,
+          [
+            item.workspace_id,agentVersionId,packageObjectKey,packageStorageSha256,
+            Buffer.byteLength(JSON.stringify(built.content)),
+          ],
+        );
+        await client.query(
+          `INSERT INTO operational_jobs(workspace_id,job_type,payload)
+           VALUES ($1,'STORE_ARTIFACT',$2::jsonb)`,
+          [
+            item.workspace_id,
+            JSON.stringify({
+              artifactObjectId:artifact.rows[0]!.id,
+              objectKey:packageObjectKey,
+              content:built.content,
+              expectedSha256:packageStorageSha256,
+            }),
           ],
         );
 
@@ -1370,16 +1398,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
         const context=await client.query<{
           agent_version_id:string;package_sha256:string;package_manifest:any;
-          release_id:string;release_version:string;registry_id:string;version:string;rights_status:string;
+          release_id:string;release_version:string;registry_id:string;version:string;rights_status:string;workspace_id:string;
         }>(
           `SELECT rp.agent_version_id,rp.package_sha256,rp.package_manifest,
-                  r.id release_id,r.release_version,a.registry_id,av.version,ra.rights_status
+                  r.id release_id,r.release_version,a.registry_id,av.version,ra.rights_status,pj.workspace_id
            FROM release_package_records rp
            JOIN releases r ON r.id=rp.release_id
            JOIN agent_versions av ON av.id=rp.agent_version_id
            JOIN agents a ON a.id=av.agent_id
            JOIN release_approval_records ra ON ra.id=rp.release_approval_id
            JOIN lifecycle_readiness l ON l.agent_version_id=rp.agent_version_id
+           JOIN promptforge_transformations pt ON pt.agent_version_id=rp.agent_version_id
+           JOIN projects pj ON pj.id=pt.project_id
            WHERE rp.id=$1
              AND l.packaging_status='PACKAGED'
              AND l.publication_status='NOT_PUBLISHED'
@@ -1411,6 +1441,32 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,'PUBLISHED')
            RETURNING id`,
           [packageRecordId,channel,externalReference,user.id,idempotencyKey,JSON.stringify(payload)],
+        );
+
+        const publicationObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/publications/${record.rows[0]!.id}.json`;
+        const publicationStorageSha256=sha256Text(JSON.stringify(payload));
+        const publicationArtifact=await client.query<{id:string}>(
+          `INSERT INTO artifact_objects(
+             workspace_id,agent_version_id,kind,object_key,sha256,media_type,byte_size
+           ) VALUES ($1,$2,'PUBLICATION_PAYLOAD',$3,$4,'application/json',$5)
+           RETURNING id`,
+          [
+            item.workspace_id,item.agent_version_id,publicationObjectKey,publicationStorageSha256,
+            Buffer.byteLength(JSON.stringify(payload)),
+          ],
+        );
+        await client.query(
+          `INSERT INTO operational_jobs(workspace_id,job_type,payload)
+           VALUES ($1,'STORE_ARTIFACT',$2::jsonb)`,
+          [
+            item.workspace_id,
+            JSON.stringify({
+              artifactObjectId:publicationArtifact.rows[0]!.id,
+              objectKey:publicationObjectKey,
+              content:payload,
+              expectedSha256:publicationStorageSha256,
+            }),
+          ],
         );
 
         await client.query(
@@ -1482,12 +1538,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if(existingForPublication.rowCount) return json(res,409,{error:"frankai_registration_already_exists"});
 
     const context=await query<{
-      agent_version_id:string;publication_payload:any;publication_status:string;
+      agent_version_id:string;publication_payload:any;publication_status:string;workspace_id:string;registry_id:string;version:string;
     }>(
-      `SELECT rp.agent_version_id,p.publication_payload,l.publication_status
+      `SELECT rp.agent_version_id,p.publication_payload,l.publication_status,pj.workspace_id,a.registry_id,av.version
        FROM publication_records p
        JOIN release_package_records rp ON rp.id=p.release_package_record_id
        JOIN lifecycle_readiness l ON l.agent_version_id=rp.agent_version_id
+       JOIN agent_versions av ON av.id=rp.agent_version_id
+       JOIN agents a ON a.id=av.agent_id
+       JOIN promptforge_transformations pt ON pt.agent_version_id=rp.agent_version_id
+       JOIN projects pj ON pj.id=pt.project_id
        WHERE p.id=$1`,
       [publicationId],
     );
@@ -1540,6 +1600,33 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'REGISTERED')
            RETURNING id`,
           [publicationId,registrationReference,idempotencyKey,JSON.stringify(payload),JSON.stringify(responsePayload)],
+        );
+
+        const registrationEvidence={request:payload,response:responsePayload,registrationReference};
+        const registrationObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/frankai/${record.rows[0]!.id}.json`;
+        const registrationStorageSha256=sha256Text(JSON.stringify(registrationEvidence));
+        const registrationArtifact=await client.query<{id:string}>(
+          `INSERT INTO artifact_objects(
+             workspace_id,agent_version_id,kind,object_key,sha256,media_type,byte_size
+           ) VALUES ($1,$2,'FRANKAI_REGISTRATION',$3,$4,'application/json',$5)
+           RETURNING id`,
+          [
+            item.workspace_id,item.agent_version_id,registrationObjectKey,registrationStorageSha256,
+            Buffer.byteLength(JSON.stringify(registrationEvidence)),
+          ],
+        );
+        await client.query(
+          `INSERT INTO operational_jobs(workspace_id,job_type,payload)
+           VALUES ($1,'STORE_ARTIFACT',$2::jsonb)`,
+          [
+            item.workspace_id,
+            JSON.stringify({
+              artifactObjectId:registrationArtifact.rows[0]!.id,
+              objectKey:registrationObjectKey,
+              content:registrationEvidence,
+              expectedSha256:registrationStorageSha256,
+            }),
+          ],
         );
 
         await client.query(
