@@ -36,6 +36,8 @@ def validate_run(doc):
         if bad: errs.append("EV-003: PASS run contains required assertions that are not PASS")
         if not policy.get("allow_not_tested",False) and any(r["outcome"]=="NOT_TESTED" for r in results):
             errs.append("EV-004: NOT_TESTED cannot aggregate to PASS")
+        if not policy.get("allow_not_applicable",True) and any(r["outcome"]=="NOT_APPLICABLE" for r in results):
+            errs.append("EV-007: NOT_APPLICABLE cannot aggregate to PASS when policy disallows it")
     for r in results:
         if r["outcome"] in {"PASS","PARTIAL","FAIL"} and not r.get("evidence"):
             errs.append(f"EV-005: result {r['case_id']}:{r['assertion_id']} requires evidence")
