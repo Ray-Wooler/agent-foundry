@@ -136,3 +136,46 @@ Review records bind reviewer identity, workspace role, rationale and the exact c
 A semantic approval only makes the candidate eligible to enter evaluation. It does not certify or release the agent.
 
 A request for changes never mutates the reviewed APS. It creates a new PromptForge transformation using the same immutable source artifact plus separately recorded reviewer guidance, producing a new AgentVersion under the same Agent registry identity.
+
+
+## Phase 4 Evaluation Orchestration
+
+Semantically approved candidates now enter an explicit evaluation lifecycle:
+
+```text
+CANDIDATE
+   |
+   v
+Freeze required evaluation suites
+   |
+   v
+VALIDATED
+   |
+   +--> deterministic machine suites
+   |
+   +--> human suites -> AWAITING_HUMAN
+   |                     |
+   |                     v
+   |               reviewer evidence
+   |                     |
+   +---------------------+
+   |
+   v
+Aggregate required outcomes
+   |
+   v
+EVALUATED
+   |
+   +--> PASS -> separate certification-readiness review may mark ELIGIBLE
+   |
+   +--> FAIL -> NOT_ELIGIBLE
+```
+
+Evaluation completion and evaluation success are distinct. An AgentVersion becomes `EVALUATED` after the required plan completes even when the aggregate is FAIL.
+
+A PASS aggregate does not automatically certify the agent. Certification eligibility requires a separate immutable human readiness decision, and Phase 4 still blocks direct transition to `CERTIFIED`.
+
+Built-in Phase 4 suites:
+
+- `core-governance-v1` — machine assertions over canonical APS boundaries;
+- `human-semantic-quality-v1` — required human evaluation evidence.
