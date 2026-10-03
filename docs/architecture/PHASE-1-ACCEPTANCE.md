@@ -15,8 +15,10 @@ Phase 1 Application Foundation is not accepted until P1-G7 passes on the exact P
 
 ## Foundation Decision
 
-**APPLICATION FOUNDATION PASS / VERIFIED / AWAITING ENFORCEMENT**
+**APPLICATION FOUNDATION PASS / VERIFIED / ENFORCED**
 
 Evidence: PostgreSQL 16 initialized; migrations 0001 and 0002 applied; workspace typecheck/build passed; web/API/worker processes started; authenticated intake produced transformation `0e2ecafc-be01-48f0-a7f6-b5bc48b50199`, registry candidate `AGR-1000`, and candidate digest `f59ba01aee09fee6c59c7d16ac4b8fa67693c594d1602b70ed96b5a32480574b`.
 
 Final verification head: `e52ac12aa8ba07c9f77769c96e7408f9962d57e0` — all seven Phase Zero required checks plus Application Foundation passed.
+
+Enforcement: Protect Main ruleset 24352789 requires Application Foundation in addition to all seven Phase Zero checks.
