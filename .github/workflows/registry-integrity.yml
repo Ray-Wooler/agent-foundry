@@ -2,11 +2,6 @@ name: Registry Integrity
 
 on:
   pull_request:
-    paths:
-      - "migrations/**"
-      - "tests/sql/**"
-      - "docs/architecture/ADR/0005-registry-persistence.md"
-      - ".github/workflows/registry-integrity.yml"
   push:
     branches: [main]
     paths:
