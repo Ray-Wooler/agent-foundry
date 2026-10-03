@@ -3,6 +3,8 @@ import {
   PutObjectCommand,
   HeadObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
 } from "@aws-sdk/client-s3";
 import { sha256Text } from "@agent-foundry/domain";
 
@@ -41,6 +43,14 @@ export class ArtifactStore {
       forcePathStyle:config.forcePathStyle,
       credentials:{accessKeyId:config.accessKeyId,secretAccessKey:config.secretAccessKey},
     });
+  }
+
+  async ensureBucket() {
+    try {
+      await this.client.send(new HeadBucketCommand({Bucket:this.config.bucket}));
+    } catch {
+      await this.client.send(new CreateBucketCommand({Bucket:this.config.bucket}));
+    }
   }
 
   async putJson(key:string,value:unknown,expectedSha256?:string) {
