@@ -450,25 +450,25 @@ export class PromptForgeEngine {
     };
 
     const intentResult = await this.provider.generate<IntentAnalysis>(
-      "INTENT_ANALYSIS", input.sourcePrompt, { name: input.name, agentClass: input.agentClass },
+      "INTENT_ANALYSIS", input.sourcePrompt, { name: input.name, agentClass: input.agentClass, revisionRequest: input.revisionRequest ?? null },
     );
     const intent = normalizeIntent(intentResult.data);
     await recordStage({ stage: "INTENT_ANALYSIS", output: intent, metadata: intentResult.metadata });
 
     const defectResult = await this.provider.generate<DefectAnalysis>(
-      "DEFECT_ANALYSIS", input.sourcePrompt, { intent },
+      "DEFECT_ANALYSIS", input.sourcePrompt, { intent, revisionRequest: input.revisionRequest ?? null },
     );
     const defects = normalizeDefects(defectResult.data);
     await recordStage({ stage: "DEFECT_ANALYSIS", output: defects, metadata: defectResult.metadata });
 
     const capabilityResult = await this.provider.generate<CapabilityAnalysis>(
-      "CAPABILITY_EXTRACTION", input.sourcePrompt, { intent, defects },
+      "CAPABILITY_EXTRACTION", input.sourcePrompt, { intent, defects, revisionRequest: input.revisionRequest ?? null },
     );
     const capabilityAnalysis = normalizeCapabilities(capabilityResult.data);
     await recordStage({ stage: "CAPABILITY_EXTRACTION", output: capabilityAnalysis, metadata: capabilityResult.metadata });
 
     const governanceResult = await this.provider.generate<GovernanceAnalysis>(
-      "GOVERNANCE_CONSTRUCTION", input.sourcePrompt, { intent, defects, capabilities: capabilityAnalysis },
+      "GOVERNANCE_CONSTRUCTION", input.sourcePrompt, { intent, defects, capabilities: capabilityAnalysis, revisionRequest: input.revisionRequest ?? null },
     );
     const governance = normalizeGovernance(governanceResult.data);
     await recordStage({ stage: "GOVERNANCE_CONSTRUCTION", output: governance, metadata: governanceResult.metadata });
@@ -547,6 +547,7 @@ export class PromptForgeEngine {
           review_state: "REQUIRES_REVIEW",
           defect_count: defects.defects.length,
           risk_notes: governance.riskNotes,
+          revision_request_sha256: input.revisionRequest ? sha256Text(input.revisionRequest) : null,
         },
       },
     };

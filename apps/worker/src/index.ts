@@ -23,6 +23,7 @@ type Claimed = {
   created_by_user_id: string;
   content_text: string;
   rights_status: RightsStatus;
+  configuration: Record<string, unknown>;
 };
 
 async function claim(): Promise<Claimed | null> {
@@ -30,7 +31,7 @@ async function claim(): Promise<Claimed | null> {
     const claimed = await client.query<{
       id: string; project_id: string; source_artifact_id: string;
       requested_name: string; requested_class: CandidateRequest["agentClass"];
-      created_by_user_id: string;
+      created_by_user_id: string; configuration: Record<string, unknown>;
     }>(
       `WITH next AS (
          SELECT id FROM promptforge_transformations
@@ -43,7 +44,7 @@ async function claim(): Promise<Claimed | null> {
        SET status='PROCESSING', started_at=now(), failure_reason=NULL
        FROM next
        WHERE t.id=next.id
-       RETURNING t.id,t.project_id,t.source_artifact_id,t.requested_name,t.requested_class,t.created_by_user_id`,
+       RETURNING t.id,t.project_id,t.source_artifact_id,t.requested_name,t.requested_class,t.created_by_user_id,t.configuration`,
     );
     const row = claimed.rows[0];
     if (!row) return null;
@@ -65,6 +66,9 @@ async function processOne(item: Claimed) {
       agentClass: item.requested_class,
       sourcePrompt: item.content_text,
       rightsStatus: item.rights_status,
+      revisionRequest: typeof item.configuration.revisionRequest === "string"
+        ? item.configuration.revisionRequest
+        : undefined,
     }, async (stage) => {
       await transaction(async (client) => {
         await client.query(
@@ -98,22 +102,51 @@ async function processOne(item: Claimed) {
     });
 
     await transaction(async (client) => {
-      const seq = await client.query<{ value: string }>("SELECT nextval('agent_registry_seq')::text AS value");
-      const suffix = seq.rows[0]!.value;
-      const registryId = `AGR-${suffix}`;
-      const slug = `${slugify(item.requested_name)}-${suffix}`;
+      const parentAgentVersionId = typeof item.configuration.parentAgentVersionId === "string"
+        ? item.configuration.parentAgentVersionId
+        : null;
 
-      const agent = await client.query<{ id: string }>(
-        `INSERT INTO agents(registry_id,slug,name,class,category)
-         VALUES ($1,$2,$3,$4,'candidate') RETURNING id`,
-        [registryId, slug, item.requested_name, item.requested_class],
-      );
-      const agentId = agent.rows[0]!.id;
+      let agentId: string;
+      let registryId: string;
+      let versionLabel: string;
+
+      if (parentAgentVersionId) {
+        const parent = await client.query<{ agent_id: string; registry_id: string }>(
+          `SELECT av.agent_id,a.registry_id
+           FROM agent_versions av
+           JOIN agents a ON a.id=av.agent_id
+           WHERE av.id=$1`,
+          [parentAgentVersionId],
+        );
+        const parentRow = parent.rows[0];
+        if (!parentRow) throw new Error("revision parent AgentVersion not found");
+        agentId = parentRow.agent_id;
+        registryId = parentRow.registry_id;
+
+        const count = await client.query<{ count: string }>(
+          "SELECT count(*)::text AS count FROM agent_versions WHERE agent_id=$1",
+          [agentId],
+        );
+        versionLabel = `0.1.${count.rows[0]!.count}`;
+      } else {
+        const seq = await client.query<{ value: string }>("SELECT nextval('agent_registry_seq')::text AS value");
+        const suffix = seq.rows[0]!.value;
+        registryId = `AGR-${suffix}`;
+        const slug = `${slugify(item.requested_name)}-${suffix}`;
+
+        const agent = await client.query<{ id: string }>(
+          `INSERT INTO agents(registry_id,slug,name,class,category)
+           VALUES ($1,$2,$3,$4,'candidate') RETURNING id`,
+          [registryId, slug, item.requested_name, item.requested_class],
+        );
+        agentId = agent.rows[0]!.id;
+        versionLabel = "0.1.0";
+      }
 
       const version = await client.query<{ id: string }>(
         `INSERT INTO agent_versions(agent_id,version,status,aps_version)
-         VALUES ($1,'0.1.0','DRAFT','1.5-alpha') RETURNING id`,
-        [agentId],
+         VALUES ($1,$2,'DRAFT','1.5-alpha') RETURNING id`,
+        [agentId, versionLabel],
       );
       const versionId = version.rows[0]!.id;
 
@@ -157,6 +190,18 @@ async function processOne(item: Claimed) {
           item.id,
         ],
       );
+
+      const parentTransformationId = typeof item.configuration.parentTransformationId === "string"
+        ? item.configuration.parentTransformationId : null;
+      if (parentTransformationId) {
+        await client.query(
+          `UPDATE candidate_revision_lineage
+           SET child_agent_version_id=$1
+           WHERE child_transformation_id=$2
+             AND child_agent_version_id IS NULL`,
+          [versionId, item.id],
+        );
+      }
 
       await client.query(
         `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
