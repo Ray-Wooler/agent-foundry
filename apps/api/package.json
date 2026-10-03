@@ -14,6 +14,7 @@
     "@agent-foundry/auth": "workspace:*",
     "@agent-foundry/db": "workspace:*",
     "@agent-foundry/domain": "workspace:*",
-    "@agent-foundry/evaluation": "workspace:*"
+    "@agent-foundry/evaluation": "workspace:*",
+    "@agent-foundry/release": "workspace:*"
   }
 }
