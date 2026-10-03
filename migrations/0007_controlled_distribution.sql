@@ -11,18 +11,19 @@ ALTER TABLE release_package_records
   ADD COLUMN idempotency_key text,
   ADD COLUMN package_manifest jsonb,
   ADD COLUMN package_content jsonb,
+  ADD COLUMN historical_content_available boolean NOT NULL DEFAULT true,
   ADD COLUMN created_by_user_id uuid REFERENCES app_users(id) ON DELETE RESTRICT;
 
 UPDATE release_package_records
 SET idempotency_key='legacy-'||id::text,
     package_manifest=jsonb_build_object('legacy',true,'package_sha256',package_sha256),
-    package_content=jsonb_build_object('legacy',true)
+    package_content=NULL,
+    historical_content_available=false
 WHERE idempotency_key IS NULL;
 
 ALTER TABLE release_package_records
   ALTER COLUMN idempotency_key SET NOT NULL,
   ALTER COLUMN package_manifest SET NOT NULL,
-  ALTER COLUMN package_content SET NOT NULL,
   ADD CONSTRAINT release_package_records_idempotency_key_unique UNIQUE(idempotency_key),
   ADD CONSTRAINT release_package_records_agent_unique UNIQUE(agent_version_id);
 
@@ -83,8 +84,12 @@ BEGIN
      OR lifecycle_approval IS DISTINCT FROM 'APPROVED' THEN
     RAISE EXCEPTION 'packaging requires explicit APPROVE release authority';
   END IF;
-  IF encode(digest(convert_to(NEW.package_content::text,'UTF8'),'sha256'),'hex') IS DISTINCT FROM NEW.package_sha256 THEN
+  IF NEW.historical_content_available
+     AND (NEW.package_content IS NULL OR encode(digest(convert_to(NEW.package_content::text,'UTF8'),'sha256'),'hex') IS DISTINCT FROM NEW.package_sha256) THEN
     RAISE EXCEPTION 'package_sha256 must equal stored package_content digest';
+  END IF;
+  IF NOT NEW.historical_content_available AND NEW.package_content IS NOT NULL THEN
+    RAISE EXCEPTION 'historical package content is unavailable';
   END IF;
   RETURN NEW;
 END $$;

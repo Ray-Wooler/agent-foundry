@@ -1634,19 +1634,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     // a retry with the same key may safely resume an IN_FLIGHT/FAILED attempt.
     try {
       await transaction(async(client)=>{
+        await client.query(
+          `INSERT INTO frankai_registration_attempts(publication_record_id,idempotency_key,request_payload)
+           VALUES ($1,$2,$3::jsonb)
+           ON CONFLICT DO NOTHING`,
+          [publicationId,idempotencyKey,JSON.stringify(payload)],
+        );
         const byPublication=await client.query<{idempotency_key:string;status:string}>(
           "SELECT idempotency_key,status FROM frankai_registration_attempts WHERE publication_record_id=$1 FOR UPDATE",
           [publicationId],
         );
-        if(byPublication.rowCount && byPublication.rows[0]!.idempotency_key!==idempotencyKey) {
+        if(byPublication.rows[0]?.idempotency_key!==idempotencyKey) {
           throw new Error("frankai_registration_already_exists");
-        }
-        if(!byPublication.rowCount) {
-          await client.query(
-            `INSERT INTO frankai_registration_attempts(publication_record_id,idempotency_key,request_payload)
-             VALUES ($1,$2,$3::jsonb)`,
-            [publicationId,idempotencyKey,JSON.stringify(payload)],
-          );
         }
       });
     } catch(error) {

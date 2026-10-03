@@ -31,3 +31,15 @@ test("incomplete legacy payloads fail closed",()=>{
     publicationPayload:{agent:{registryId:"a",version:"1"},release:{releaseId:"r",releaseVersion:"1",packageSha256:"a".repeat(64)}},
   }),/incomplete/);
 });
+
+test("non-PASS evaluation evidence fails closed",()=>{
+  assert.throws(()=>buildFrankAIRegistrationPayload({
+    publicationRecordId:"not-pass",
+    publicationPayload:{
+      agent:{registryId:"agent-1",version:"1.2.3"},
+      release:{releaseId:"release-1",releaseVersion:"1.2.3",packageSha256:"a".repeat(64)},
+      apsVersion:"1.5-alpha",runtimeTargets:["generic"],capabilities:[],
+      evaluationRequiredOutcome:"PASS",evaluationAggregate:"FAIL",evaluationRunIds:["run-1"],rightsStatus:"VERIFIED",
+    },
+  }),/incomplete/);
+});

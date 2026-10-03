@@ -13,4 +13,11 @@ CREATE TABLE frankai_registration_attempts (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE operational_jobs
+  ADD COLUMN lock_token uuid;
+
+CREATE INDEX idx_operational_jobs_running_lease
+  ON operational_jobs(locked_at)
+  WHERE status='RUNNING';
+
 COMMIT;

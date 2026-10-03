@@ -531,6 +531,7 @@ type OperationalJob={
   payload:Record<string,unknown>;
   attempts:number;
   max_attempts:number;
+  lock_token:string;
 };
 
 async function heartbeat() {
@@ -557,10 +558,10 @@ async function claimOperationalJob():Promise<OperationalJob|null> {
          LIMIT 1
        )
        UPDATE operational_jobs j
-       SET status='RUNNING',locked_at=now(),locked_by=$1,attempts=j.attempts+1
+       SET status='RUNNING',locked_at=now(),locked_by=$1,lock_token=gen_random_uuid(),attempts=j.attempts+1
        FROM next
        WHERE j.id=next.id
-       RETURNING j.id,j.workspace_id,j.job_type,j.payload,j.attempts,j.max_attempts`,
+       RETURNING j.id,j.workspace_id,j.job_type,j.payload,j.attempts,j.max_attempts,j.lock_token`,
       [workerId, String(operationalLeaseSeconds)],
     );
     return result.rows[0]??null;
@@ -571,8 +572,8 @@ async function finishOperationalJob(job:OperationalJob) {
   await query(
     `UPDATE operational_jobs
      SET status='COMPLETED',completed_at=now(),locked_at=NULL,locked_by=NULL,last_error=NULL
-     WHERE id=$1`,
-    [job.id],
+     WHERE id=$1 AND locked_by=$2 AND lock_token=$3`,
+    [job.id,workerId,job.lock_token],
   );
 }
 
@@ -581,13 +582,15 @@ async function failOperationalJob(job:OperationalJob,error:unknown) {
   const dead=job.attempts>=job.max_attempts;
   const delaySeconds=Math.min(300,Math.max(5,2**Math.min(job.attempts,8)));
   await transaction(async(client)=>{
-    await client.query(
+    const updated=await client.query(
       `UPDATE operational_jobs
        SET status=$1,last_error=$2,available_at=CASE WHEN $1='RETRY' THEN now()+($3::text||' seconds')::interval ELSE available_at END,
            locked_at=NULL,locked_by=NULL
-       WHERE id=$4`,
-      [dead?"DEAD":"RETRY",reason.slice(0,2000),String(delaySeconds),job.id],
+           ,lock_token=NULL
+       WHERE id=$4 AND locked_by=$5 AND lock_token=$6`,
+      [dead?"DEAD":"RETRY",reason.slice(0,2000),String(delaySeconds),job.id,workerId,job.lock_token],
     );
+    if(!updated.rowCount) return;
     const artifactObjectId=typeof job.payload.artifactObjectId==="string"?job.payload.artifactObjectId:null;
     if(artifactObjectId) {
       await client.query(

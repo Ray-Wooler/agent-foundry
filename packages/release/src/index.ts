@@ -175,7 +175,8 @@ export function buildFrankAIRegistrationPayload(input:{
     || !/^[a-f0-9]{64}$/.test(String(publication.release.packageSha256??""))
     || !publication.apsVersion || !Array.isArray(publication.runtimeTargets) || publication.runtimeTargets.length===0
     || !Array.isArray(publication.capabilities)
-    || !publication.evaluationAggregate || !Array.isArray(publication.evaluationRunIds) || publication.evaluationRunIds.length===0
+    || publication.evaluationRequiredOutcome!=="PASS" || publication.evaluationAggregate!=="PASS"
+    || !Array.isArray(publication.evaluationRunIds) || publication.evaluationRunIds.length===0
     || !["VERIFIED","RESTRICTED"].includes(publication.rightsStatus)) {
     throw new Error("registration publication payload is incomplete for FrankAI contract v1.0");
   }
