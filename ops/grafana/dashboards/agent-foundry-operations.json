@@ -1,0 +1,155 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Queued operational jobs",
+      "targets": [
+        {
+          "expr": "agent_foundry_operational_jobs{status=\"QUEUED\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Retry jobs",
+      "targets": [
+        {
+          "expr": "agent_foundry_operational_jobs{status=\"RETRY\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Dead-letter jobs",
+      "targets": [
+        {
+          "expr": "agent_foundry_operational_jobs{status=\"DEAD\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Pending artifacts",
+      "targets": [
+        {
+          "expr": "agent_foundry_artifacts{status=\"PENDING\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Stored artifacts",
+      "targets": [
+        {
+          "expr": "agent_foundry_artifacts{status=\"STORED\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Dead artifacts",
+      "targets": [
+        {
+          "expr": "agent_foundry_artifacts{status=\"DEAD\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Worker heartbeat age (s)",
+      "targets": [
+        {
+          "expr": "agent_foundry_worker_heartbeat_age_seconds",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Security events HIGH/CRITICAL",
+      "targets": [
+        {
+          "expr": "sum(agent_foundry_security_events{severity=~\"HIGH|CRITICAL\"})",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 18,
+        "y": 4,
+        "w": 6,
+        "h": 4
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "agent-foundry",
+    "operations"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Agent Foundry Operations",
+  "uid": "agent-foundry-ops",
+  "version": 1
+}

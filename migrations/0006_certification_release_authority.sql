@@ -203,6 +203,11 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  IF OLD.status='DRAFT'
+     AND NEW.status NOT IN ('CANDIDATE','REJECTED','QUARANTINED') THEN
+    RAISE EXCEPTION 'DRAFT may only transition to CANDIDATE or an explicit terminal governance state';
+  END IF;
+
   IF OLD.status='CANDIDATE'
      AND NEW.status NOT IN ('VALIDATED','REJECTED','SUPERSEDED','RETIRED','QUARANTINED') THEN
     RAISE EXCEPTION 'CANDIDATE must transition through VALIDATED';
@@ -235,6 +240,10 @@ BEGIN
   IF OLD.status='CERTIFIED'
      AND NEW.status NOT IN ('SUPERSEDED','RETIRED','QUARANTINED') THEN
     RAISE EXCEPTION 'CERTIFIED AgentVersion state is stable; packaging/publication use separate records';
+  END IF;
+
+  IF OLD.status IN ('REJECTED','SUPERSEDED','RETIRED','QUARANTINED') THEN
+    RAISE EXCEPTION 'terminal AgentVersion state cannot transition';
   END IF;
 
   IF NEW.status='RELEASED' AND OLD.status<>'RELEASED' THEN

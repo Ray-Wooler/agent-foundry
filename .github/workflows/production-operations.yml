@@ -1,0 +1,146 @@
+name: Production Operations
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  production-operations:
+    name: Production Operations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: foundry
+      DATABASE_URL: postgres://foundry:foundry@localhost:5432/foundry
+      API_PORT: "3001"
+      WEB_PORT: "3000"
+      API_PUBLIC_URL: http://localhost:3001
+      WEB_PUBLIC_URL: http://localhost:3000
+      WEB_ORIGIN: http://localhost:3000
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: phase1-test-password
+      BOOTSTRAP_WORKSPACE_NAME: Production Test Workspace
+      SESSION_TTL_HOURS: "1"
+      WORKER_POLL_MS: "100"
+      WORKER_ID: phase7-ci-worker
+      PROMPTFORGE_PROVIDER: deterministic
+      MOCK_FRANKAI_PORT: "4010"
+      MOCK_FRANKAI_URL: http://127.0.0.1:4010
+      FRANKAI_REGISTRY_URL: http://127.0.0.1:4010/v1/agent-releases
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:5000
+      OBJECT_STORAGE_REGION: us-east-1
+      OBJECT_STORAGE_BUCKET: agent-foundry
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ACCESS_KEY: test
+      OBJECT_STORAGE_SECRET_KEY: test
+      APP_VERSION: phase7-ci
+      TENANT_ISOLATION_PASSWORD: phase7-tenant-password
+      ACME_EMAIL: ci@example.com
+      OPENAI_MODEL: ci-model
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.12.4 --activate
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck workspace
+        run: pnpm typecheck
+      - name: Build workspace
+        run: pnpm build
+      - name: Validate production container build
+        run: docker build -t agent-foundry:phase7-ci .
+      - name: Validate production Compose
+        shell: bash
+        run: |
+          sudo mkdir -p /etc/agent-foundry/secrets
+          echo foundry | sudo tee /etc/agent-foundry/secrets/postgres_password >/dev/null
+          echo postgres://foundry:foundry@postgres:5432/foundry | sudo tee /etc/agent-foundry/secrets/database_url >/dev/null
+          echo bootstrap-secret-password | sudo tee /etc/agent-foundry/secrets/bootstrap_admin_password >/dev/null
+          echo test-openai-key | sudo tee /etc/agent-foundry/secrets/openai_api_key >/dev/null
+          echo minioadmin | sudo tee /etc/agent-foundry/secrets/object_storage_access_key >/dev/null
+          echo minioadmin123 | sudo tee /etc/agent-foundry/secrets/object_storage_secret_key >/dev/null
+          echo grafana-secret-password | sudo tee /etc/agent-foundry/secrets/grafana_admin_password >/dev/null
+          BOOTSTRAP_ADMIN_EMAIL=admin@example.com BOOTSTRAP_WORKSPACE_NAME=Production APP_VERSION=phase7-ci \
+          PROMPTFORGE_PROVIDER=deterministic OPENAI_MODEL=ci-model FRANKAI_REGISTRY_URL=http://frankai.invalid \
+          OBJECT_STORAGE_ENDPOINT=https://s3.example.invalid OBJECT_STORAGE_REGION=us-east-1 OBJECT_STORAGE_BUCKET=agent-foundry \
+          OBJECT_STORAGE_FORCE_PATH_STYLE=false ACME_EMAIL=ci@example.com \
+          docker compose -f compose.production.yml config >/tmp/compose-rendered.yml
+      - name: Apply database migrations
+        run: pnpm db:migrate
+      - name: Start S3 emulator and initialize bucket
+        shell: bash
+        run: |
+          python -m venv /tmp/moto-venv
+          /tmp/moto-venv/bin/pip install "moto[server,s3]==5.2.3"
+          nohup /tmp/moto-venv/bin/moto_server -H 127.0.0.1 -p 5000 >/tmp/moto-s3.log 2>&1 &
+          echo $! >/tmp/moto-s3.pid
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:5000/ >/dev/null; then break; fi
+            if [ "$i" -eq 60 ]; then cat /tmp/moto-s3.log; exit 1; fi
+            sleep 0.5
+          done
+          node scripts/init_object_storage.mjs
+      - name: Execute governed flow and production hardening assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/mock_frankai_registry.mjs >/tmp/frankai-mock.log 2>&1 & MOCK_PID=$!
+          pnpm --filter @agent-foundry/api start >/tmp/foundry-api.log 2>&1 & API_PID=$!
+          pnpm --filter @agent-foundry/worker start >/tmp/foundry-worker.log 2>&1 & WORKER_PID=$!
+          pnpm --filter @agent-foundry/web start >/tmp/foundry-web.log 2>&1 & WEB_PID=$!
+          cleanup() { kill "$MOCK_PID" "$API_PID" "$WORKER_PID" "$WEB_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/ready >/dev/null && curl -fsS http://localhost:3000/ready >/dev/null && curl -fsS http://127.0.0.1:4010/_state >/dev/null; then break; fi
+            if [ "$i" -eq 60 ]; then
+              cat /tmp/foundry-api.log || true; cat /tmp/foundry-worker.log || true; cat /tmp/foundry-web.log || true; cat /tmp/frankai-mock.log || true; exit 1
+            fi
+            sleep 0.5
+          done
+          node scripts/test_controlled_distribution.mjs
+          node scripts/test_production_hardening.mjs
+      - name: Verify backup and restore
+        shell: bash
+        run: |
+          archive=$(BACKUP_ROOT=/tmp/foundry-backups sh ops/backup.sh)
+          sh ops/backup-verify.sh "$archive"
+          createdb -h localhost -U foundry foundry_restore
+          DATABASE_URL=postgres://foundry:foundry@localhost:5432/foundry_restore sh ops/restore.sh "$archive"
+          restored=$(psql -h localhost -U foundry -d foundry_restore -Atc "select count(*) from app_schema_migrations")
+          test "$restored" -ge 8
+      - name: Security assertions
+        shell: bash
+        run: |
+          grep -q "Strict-Transport-Security" ops/Caddyfile
+          grep -q "X-Frame-Options" ops/Caddyfile
+          grep -q "respond @metrics 404" ops/Caddyfile
+          test -f docs/security/PHASE-7-SECURITY-REVIEW.md
+          test -f docs/operations/DISASTER-RECOVERY.md
+
+      - name: Cleanup S3 emulator
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/moto-s3.pid ]; then kill "$(cat /tmp/moto-s3.pid)" 2>/dev/null || true; fi

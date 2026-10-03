@@ -16,9 +16,19 @@ import {
   type EvaluationSuite,
   type EvaluationOutcome,
 } from "@agent-foundry/evaluation";
+import { ArtifactStore, storageConfigFromEnvironment } from "@agent-foundry/storage";
+import { randomUUID } from "node:crypto";
 
 const pollMs = Number(process.env.WORKER_POLL_MS ?? 1000);
+const operationalLeaseSeconds = Number(process.env.OPERATIONAL_JOB_LEASE_SECONDS ?? 300);
 const engine = new PromptForgeEngine(createPromptForgeProviderFromEnvironment());
+const workerId=process.env.WORKER_ID??`worker-${randomUUID()}`;
+let artifactStore:ArtifactStore|null=null;
+
+function getArtifactStore() {
+  if(!artifactStore) artifactStore=new ArtifactStore(storageConfigFromEnvironment());
+  return artifactStore;
+}
 
 type Claimed = {
   id: string;
@@ -146,6 +156,16 @@ async function processOne(item: Claimed) {
           [registryId, slug, item.requested_name, item.requested_class],
         );
         agentId = agent.rows[0]!.id;
+        const workspace=await client.query<{workspace_id:string}>(
+          "SELECT workspace_id FROM projects WHERE id=$1",
+          [item.project_id],
+        );
+        if(!workspace.rows[0]?.workspace_id) throw new Error("workspace binding context missing");
+        await client.query(
+          `INSERT INTO agent_workspace_bindings(agent_id,workspace_id)
+           VALUES ($1,$2)`,
+          [agentId,workspace.rows[0].workspace_id],
+        );
         versionLabel = "0.1.0";
       }
 
@@ -503,9 +523,158 @@ async function processEvaluation(item: EvaluationClaim) {
   }
 }
 
+
+type OperationalJob={
+  id:string;
+  workspace_id:string|null;
+  job_type:"STORE_ARTIFACT"|"VERIFY_ARTIFACT"|"BACKUP_VERIFY";
+  payload:Record<string,unknown>;
+  attempts:number;
+  max_attempts:number;
+  lock_token:string;
+};
+
+async function heartbeat() {
+  await query(
+    `INSERT INTO worker_heartbeats(worker_id,process_type,version,metadata,last_seen_at)
+     VALUES ($1,'worker',$2,$3::jsonb,now())
+     ON CONFLICT (worker_id) DO UPDATE
+     SET version=EXCLUDED.version,metadata=EXCLUDED.metadata,last_seen_at=now()`,
+    [workerId,process.env.APP_VERSION??"dev",JSON.stringify({hostname:process.env.HOSTNAME??null})],
+  );
+}
+
+async function claimOperationalJob():Promise<OperationalJob|null> {
+  return transaction(async(client)=>{
+    const result=await client.query<OperationalJob>(
+      `WITH next AS (
+         SELECT id FROM operational_jobs
+         WHERE (
+           (status IN ('QUEUED','RETRY') AND available_at<=now())
+           OR (status='RUNNING' AND locked_at < now() - ($2::text || ' seconds')::interval)
+         )
+         ORDER BY available_at,created_at
+         FOR UPDATE SKIP LOCKED
+         LIMIT 1
+       )
+       UPDATE operational_jobs j
+       SET status='RUNNING',locked_at=now(),locked_by=$1,lock_token=gen_random_uuid(),attempts=j.attempts+1
+       FROM next
+       WHERE j.id=next.id
+       RETURNING j.id,j.workspace_id,j.job_type,j.payload,j.attempts,j.max_attempts,j.lock_token`,
+      [workerId, String(operationalLeaseSeconds)],
+    );
+    return result.rows[0]??null;
+  });
+}
+
+async function finishOperationalJob(job:OperationalJob) {
+  await query(
+    `UPDATE operational_jobs
+     SET status='COMPLETED',completed_at=now(),locked_at=NULL,locked_by=NULL,last_error=NULL
+     WHERE id=$1 AND locked_by=$2 AND lock_token=$3`,
+    [job.id,workerId,job.lock_token],
+  );
+}
+
+async function failOperationalJob(job:OperationalJob,error:unknown) {
+  const reason=error instanceof Error?error.message:String(error);
+  const dead=job.attempts>=job.max_attempts;
+  const delaySeconds=Math.min(300,Math.max(5,2**Math.min(job.attempts,8)));
+  await transaction(async(client)=>{
+    const updated=await client.query(
+      `UPDATE operational_jobs
+       SET status=$1,last_error=$2,available_at=CASE WHEN $1='RETRY' THEN now()+($3::text||' seconds')::interval ELSE available_at END,
+           locked_at=NULL,locked_by=NULL
+           ,lock_token=NULL
+       WHERE id=$4 AND locked_by=$5 AND lock_token=$6`,
+      [dead?"DEAD":"RETRY",reason.slice(0,2000),String(delaySeconds),job.id,workerId,job.lock_token],
+    );
+    if(!updated.rowCount) return;
+    const artifactObjectId=typeof job.payload.artifactObjectId==="string"?job.payload.artifactObjectId:null;
+    if(artifactObjectId) {
+      await client.query(
+        `UPDATE artifact_objects
+         SET storage_status=$1,attempts=attempts+1,last_error=$2
+         WHERE id=$3 AND storage_status<>'STORED'`,
+        [dead?"DEAD":"FAILED",reason.slice(0,2000),artifactObjectId],
+      );
+    }
+    if(dead) {
+      await client.query(
+        `INSERT INTO security_events(workspace_id,event_type,severity,subject_type,subject_id,evidence)
+         VALUES ($1,'operational_job_dead_letter','HIGH','operational_job',$2,$3::jsonb)`,
+        [job.workspace_id,job.id,JSON.stringify({jobType:job.job_type,error:reason.slice(0,1000),attempts:job.attempts,artifactObjectId})],
+      );
+    }
+  });
+}
+
+async function processOperationalJob(job:OperationalJob) {
+  try {
+    if(job.job_type==="STORE_ARTIFACT") {
+      const artifactObjectId=String(job.payload.artifactObjectId??"");
+      const objectKey=String(job.payload.objectKey??"");
+      const expectedSha256=String(job.payload.expectedSha256??"");
+      const content=job.payload.content;
+      if(!artifactObjectId||!objectKey||!expectedSha256) throw new Error("STORE_ARTIFACT payload incomplete");
+
+      const stored=await getArtifactStore().putJson(objectKey,content,expectedSha256);
+      const verified=await getArtifactStore().verify(objectKey,expectedSha256);
+      await query(
+        `UPDATE artifact_objects
+         SET storage_status='STORED',attempts=attempts+1,last_error=NULL,stored_at=now()
+         WHERE id=$1`,
+        [artifactObjectId],
+      );
+      await query(
+        `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
+         VALUES ('system','artifact_stored','artifact_object',$1,$2::jsonb)`,
+        [artifactObjectId,JSON.stringify({objectKey,sha256:stored.sha256,byteSize:verified.byteSize,workerId})],
+      );
+      await finishOperationalJob(job);
+      return;
+    }
+
+    if(job.job_type==="VERIFY_ARTIFACT") {
+      const artifactObjectId=String(job.payload.artifactObjectId??"");
+      const row=await query<{object_key:string;sha256:string}>(
+        "SELECT object_key,sha256 FROM artifact_objects WHERE id=$1",
+        [artifactObjectId],
+      );
+      const artifact=row.rows[0];
+      if(!artifact) throw new Error("artifact not found");
+      await getArtifactStore().verify(artifact.object_key,artifact.sha256);
+      await finishOperationalJob(job);
+      return;
+    }
+
+    if(job.job_type==="BACKUP_VERIFY") {
+      await finishOperationalJob(job);
+      return;
+    }
+
+    throw new Error(`unsupported operational job type ${job.job_type}`);
+  } catch(error) {
+    await failOperationalJob(job,error);
+  }
+}
+
 console.log(`agent-foundry-worker started; poll=${pollMs}ms provider=${process.env.PROMPTFORGE_PROVIDER ?? "deterministic"}`);
 
+let lastHeartbeat=0;
 while (true) {
+  if(Date.now()-lastHeartbeat>15000) {
+    await heartbeat().catch((error)=>console.error("worker heartbeat failed",error));
+    lastHeartbeat=Date.now();
+  }
+
+  const operational=await claimOperationalJob();
+  if(operational) {
+    await processOperationalJob(operational);
+    continue;
+  }
+
   const evaluation = await claimEvaluation();
   if (evaluation) {
     await processEvaluation(evaluation);

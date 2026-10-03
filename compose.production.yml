@@ -1,0 +1,152 @@
+name: agent-foundry-production
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: foundry
+      POSTGRES_USER: foundry
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U foundry -d foundry"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: ["pnpm","--filter","@agent-foundry/api","start"]
+    environment:
+      NODE_ENV: production
+      API_PORT: "3001"
+      WEB_ORIGIN: https://foundry.frankai.online
+      DATABASE_URL_FILE: /run/secrets/database_url
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL}
+      BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/bootstrap_admin_password
+      BOOTSTRAP_WORKSPACE_NAME: ${BOOTSTRAP_WORKSPACE_NAME:-Production}
+      SESSION_TTL_HOURS: "12"
+      PROMPTFORGE_PROVIDER: ${PROMPTFORGE_PROVIDER:-openai}
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      OPENAI_MODEL: ${OPENAI_MODEL}
+      FRANKAI_REGISTRY_URL: ${FRANKAI_REGISTRY_URL}
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-false}
+      OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/object_storage_access_key
+      OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/object_storage_secret_key
+      APP_VERSION: ${APP_VERSION}
+    secrets: [database_url,bootstrap_admin_password,openai_api_key,object_storage_access_key,object_storage_secret_key]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks: [backend,edge,egress]
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["pnpm","--filter","@agent-foundry/worker","start"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+      WORKER_POLL_MS: "500"
+      WORKER_ID: production-worker-1
+      PROMPTFORGE_PROVIDER: ${PROMPTFORGE_PROVIDER:-openai}
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      OPENAI_MODEL: ${OPENAI_MODEL}
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-false}
+      OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/object_storage_access_key
+      OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/object_storage_secret_key
+      APP_VERSION: ${APP_VERSION}
+    secrets: [database_url,openai_api_key,object_storage_access_key,object_storage_secret_key]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [backend,egress]
+
+  web:
+    build: .
+    restart: unless-stopped
+    command: ["pnpm","--filter","@agent-foundry/web","start"]
+    environment:
+      NODE_ENV: production
+      WEB_PORT: "3000"
+      API_PUBLIC_URL: https://foundry.frankai.online/api
+      APP_VERSION: ${APP_VERSION}
+    networks: [edge]
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      api: {condition: service_healthy}
+      web: {condition: service_started}
+    networks: [edge]
+
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml","--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    secrets: [grafana_admin_password]
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [backend]
+
+networks:
+  edge:
+  egress:
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+  prometheus-data:
+  grafana-data:
+  backups:
+
+secrets:
+  postgres_password: {file: /etc/agent-foundry/secrets/postgres_password}
+  database_url: {file: /etc/agent-foundry/secrets/database_url}
+  bootstrap_admin_password: {file: /etc/agent-foundry/secrets/bootstrap_admin_password}
+  openai_api_key: {file: /etc/agent-foundry/secrets/openai_api_key}
+  object_storage_access_key: {file: /etc/agent-foundry/secrets/object_storage_access_key}
+  object_storage_secret_key: {file: /etc/agent-foundry/secrets/object_storage_secret_key}
+  grafana_admin_password: {file: /etc/agent-foundry/secrets/grafana_admin_password}
