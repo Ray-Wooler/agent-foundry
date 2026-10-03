@@ -53,7 +53,7 @@ Review of the production boundary introduced in Phase 7:
 - governance/evidence tables retain their existing immutability triggers.
 
 ### Object storage
-- MinIO is backend-only.
+- S3-compatible object storage is backend-only.
 - versioning is enabled on the artifact bucket.
 - artifacts are integrity-addressed with SHA-256.
 - upload is asynchronous through a retry/dead-letter outbox.
@@ -73,7 +73,7 @@ Review of the production boundary introduced in Phase 7:
 ## Residual risks
 
 1. Single-host Docker Compose remains a host-level availability dependency.
-2. PostgreSQL and MinIO durability still depend on off-host backup custody.
+2. PostgreSQL and external S3-compatible object storage durability still depend on off-host backup custody.
 3. The current application authorization layer is enforced in service queries rather than PostgreSQL RLS.
 4. Production OpenAI and FrankAI endpoints require external service availability.
 5. A dedicated external secret manager is not yet integrated; file-mounted secrets are the Phase 7 baseline.
