@@ -18,13 +18,13 @@ Internet
    |
    +--> API ---- PostgreSQL
           |
-          +---- MinIO object storage
+          +---- external S3-compatible object storage
           |
           +---- FrankAI registry
    |
  Worker ---- PostgreSQL
    |
-   +-------- MinIO
+   +-------- S3-compatible object storage
 
 Prometheus --> API /metrics
 Grafana ----> Prometheus
