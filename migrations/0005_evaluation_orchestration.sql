@@ -127,7 +127,7 @@ FOR EACH ROW EXECUTE FUNCTION require_completed_evaluation_for_evaluated();
 
 
 CREATE OR REPLACE FUNCTION enforce_phase4_evaluation_lifecycle()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.status=OLD.status THEN
     RETURN NEW;
@@ -148,7 +148,7 @@ BEGIN
   END IF;
 
   RETURN NEW;
-END $;
+END $$;
 
 CREATE TRIGGER trg_phase4_evaluation_lifecycle
 BEFORE UPDATE ON agent_versions
