@@ -139,6 +139,31 @@ pre{white-space:pre-wrap;word-break:break-word;background:#101317;color:#e7edf4;
 
   <h3>Certification / release authority state</h3>
   <pre id="authorityState">No certification authority decision.</pre>
+
+  <div id="packagingControls" class="hidden">
+    <h3>Controlled packaging</h3>
+    <div class="grid">
+      <div><label>Release version</label><input id="releaseVersion" value="1.0.0" /></div>
+      <div><label>Packaging idempotency key</label><input id="packageIdempotencyKey" /></div>
+    </div>
+    <p><button id="packageButton">Create immutable package</button></p>
+  </div>
+
+  <div id="publicationControls" class="hidden">
+    <h3>Publication</h3>
+    <div class="grid">
+      <div><label>Publication channel</label><input id="publicationChannel" value="foundry-internal" /></div>
+      <div><label>Publication idempotency key</label><input id="publicationIdempotencyKey" /></div>
+    </div>
+    <p><label>External reference</label><input id="publicationExternalReference" placeholder="Optional publication reference" /></p>
+    <p><button id="publishButton">Publish package</button></p>
+  </div>
+
+  <div id="registrationControls" class="hidden">
+    <h3>FrankAI registration</h3>
+    <p><label>Registration idempotency key</label><input id="registrationIdempotencyKey" /></p>
+    <p><button id="registerButton">Register published release with FrankAI</button></p>
+  </div>
 </div>
 </section>
 </div>
@@ -149,6 +174,8 @@ let currentTransformationId=null;
 let currentEvaluationPlanId=null;
 let currentHumanExecutionId=null;
 let currentAgentVersionId=null;
+let currentPackageRecordId=null;
+let currentPublicationRecordId=null;
 const q=(id)=>document.getElementById(id);
 async function api(path,options={}){
   const headers={"content-type":"application/json",...(options.headers||{})};
@@ -295,6 +322,11 @@ async function refreshAuthorityState(){
   try{
     const data=await api("/v1/agent-versions/"+currentAgentVersionId+"/authority-state");
     q("authorityState").textContent=JSON.stringify(data,null,2);
+    const packages=data.releasePackages||[];
+    const publications=data.publications||[];
+    currentPackageRecordId=packages[0]?.id||null;
+    currentPublicationRecordId=publications[0]?.id||null;
+
     if(data.authorityState?.agent_version_status==="CERTIFIED" && !data.authorityState?.release_approval_id){
       q("releaseApprovalControls").classList.remove("hidden");
     } else {
@@ -302,6 +334,24 @@ async function refreshAuthorityState(){
     }
     if(data.authorityState?.certification_record_id){
       q("certificationControls").classList.add("hidden");
+    }
+
+    if(data.authorityState?.release_approval_decision==="APPROVE" && packages.length===0){
+      q("packagingControls").classList.remove("hidden");
+    } else {
+      q("packagingControls").classList.add("hidden");
+    }
+
+    if(packages.length>0 && publications.length===0){
+      q("publicationControls").classList.remove("hidden");
+    } else {
+      q("publicationControls").classList.add("hidden");
+    }
+
+    if(publications.length>0 && !publications[0]?.frankai_registration_id){
+      q("registrationControls").classList.remove("hidden");
+    } else {
+      q("registrationControls").classList.add("hidden");
     }
   }catch(e){q("evaluationError").textContent=e.message;}
 }
@@ -334,6 +384,56 @@ q("releaseApprovalButton").onclick=async()=>{
         rationale:q("releaseApprovalRationale").value,
         intendedDistribution:q("intendedDistribution").value
       })
+    });
+    await refreshAuthorityState();
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+
+
+function ensureDistributionIdempotencyKeys(){
+  if(!q("packageIdempotencyKey").value) q("packageIdempotencyKey").value="pkg-"+crypto.randomUUID();
+  if(!q("publicationIdempotencyKey").value) q("publicationIdempotencyKey").value="pub-"+crypto.randomUUID();
+  if(!q("registrationIdempotencyKey").value) q("registrationIdempotencyKey").value="reg-"+crypto.randomUUID();
+}
+q("packageButton").onclick=async()=>{
+  if(!currentAgentVersionId)return;
+  q("evaluationError").textContent="";
+  ensureDistributionIdempotencyKeys();
+  try{
+    await api("/v1/agent-versions/"+currentAgentVersionId+"/package",{
+      method:"POST",
+      body:JSON.stringify({
+        releaseVersion:q("releaseVersion").value,
+        idempotencyKey:q("packageIdempotencyKey").value
+      })
+    });
+    await refreshAuthorityState();
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+q("publishButton").onclick=async()=>{
+  if(!currentPackageRecordId)return;
+  q("evaluationError").textContent="";
+  ensureDistributionIdempotencyKeys();
+  try{
+    await api("/v1/release-packages/"+currentPackageRecordId+"/publish",{
+      method:"POST",
+      body:JSON.stringify({
+        channel:q("publicationChannel").value,
+        externalReference:q("publicationExternalReference").value||undefined,
+        idempotencyKey:q("publicationIdempotencyKey").value
+      })
+    });
+    await refreshAuthorityState();
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+q("registerButton").onclick=async()=>{
+  if(!currentPublicationRecordId)return;
+  q("evaluationError").textContent="";
+  ensureDistributionIdempotencyKeys();
+  try{
+    await api("/v1/publications/"+currentPublicationRecordId+"/frankai-register",{
+      method:"POST",
+      body:JSON.stringify({idempotencyKey:q("registrationIdempotencyKey").value})
     });
     await refreshAuthorityState();
   }catch(e){q("evaluationError").textContent=e.message;}
