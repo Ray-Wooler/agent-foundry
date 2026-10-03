@@ -17,7 +17,7 @@ Phase 3 is not accepted until Review Governance passes on the exact PR head and 
 
 ## Phase 3 Decision
 
-**GOVERNED REVIEW & PROMOTION PASS / VERIFIED / AWAITING ENFORCEMENT**
+**GOVERNED REVIEW & PROMOTION PASS / VERIFIED / ENFORCED**
 
 Evidence from Review Governance run `37111118679`:
 
@@ -40,3 +40,5 @@ Live acceptance artifacts:
 - revision parent: `aed4be4f-6f13-46e0-807f-5f778d1c7617`
 - revision child: `fbeecebd-1461-4c1b-9a7c-8cc30a017ada`
 - change-request review: `af4b230b-9141-42d6-85f6-709d74ac4f19`
+
+Enforcement: Protect Main ruleset 24352789 requires Review Governance in addition to the nine previously enforced checks.
