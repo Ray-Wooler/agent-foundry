@@ -1236,6 +1236,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const releaseVersion=typeof body.releaseVersion==="string"?body.releaseVersion.trim():"";
     const idempotencyKey=typeof body.idempotencyKey==="string"?body.idempotencyKey.trim():"";
     if(!releaseVersion) return json(res,400,{error:"release_version_required"});
+    if(!/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/.test(releaseVersion) || releaseVersion.length>80) {
+      return json(res,400,{error:"invalid_release_version"});
+    }
     if(idempotencyKey.length<8) return json(res,400,{error:"idempotency_key_required"});
 
     try {
