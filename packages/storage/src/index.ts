@@ -7,7 +7,7 @@ import {
   CreateBucketCommand,
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
-import { sha256Text } from "@agent-foundry/domain";
+import { canonicalJson, sha256Text } from "@agent-foundry/domain";
 
 export type ObjectStorageConfig = {
   endpoint?: string;
@@ -70,7 +70,7 @@ export class ArtifactStore {
   }
 
   async putJson(key:string,value:unknown,expectedSha256?:string) {
-    const body=JSON.stringify(value);
+    const body=canonicalJson(value);
     const sha256=sha256Text(body);
     if(expectedSha256&&expectedSha256!==sha256) {
       throw new Error(`artifact digest mismatch before upload expected=${expectedSha256} actual=${sha256}`);
