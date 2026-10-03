@@ -68,11 +68,27 @@ pre{white-space:pre-wrap;word-break:break-word;background:#101317;color:#e7edf4;
 <h3>PromptForge stages</h3><pre id="stages">Waiting for worker…</pre>
 <h3>Candidate APS</h3><pre id="candidate">Waiting for worker…</pre>
 <h3>Transformation record</h3><pre id="record">Waiting for worker…</pre>
+<div id="reviewControls">
+  <h3>Semantic review</h3>
+  <div class="grid">
+    <div><label>Decision</label><select id="reviewDecision">
+      <option value="APPROVE">Approve</option>
+      <option value="REQUEST_CHANGES">Request changes</option>
+      <option value="REJECT">Reject</option>
+    </select></div>
+    <div><label>Rationale</label><input id="reviewRationale" placeholder="Why is this decision justified?" /></div>
+  </div>
+  <p><label>Requested changes</label><textarea id="requestedChanges" placeholder="Required only when requesting changes"></textarea></p>
+  <p><button id="reviewButton">Record review decision</button> <button id="revisionButton" class="hidden">Create revision</button></p>
+  <div id="reviewError" class="error"></div>
+  <pre id="reviewState">No review recorded.</pre>
+</div>
 </section>
 </div>
 <script>
 const API=${JSON.stringify(apiBase)};
 let token=sessionStorage.getItem("foundry_token");
+let currentTransformationId=null;
 const q=(id)=>document.getElementById(id);
 async function api(path,options={}){
   const headers={"content-type":"application/json",...(options.headers||{})};
@@ -101,6 +117,7 @@ q("submitButton").onclick=async()=>{q("intakeError").textContent="";q("submitBut
     rightsStatus:q("rights").value,sourcePrompt:q("sourcePrompt").value
   })});
   q("statusCard").classList.remove("hidden");q("statusBadge").textContent=data.status;
+  currentTransformationId=data.transformationId;
   await poll(data.transformationId);
 }catch(e){q("intakeError").textContent=e.message;}finally{q("submitButton").disabled=false;}};
 async function poll(id){
@@ -120,11 +137,51 @@ async function poll(id){
     if(data.stages) q("stages").textContent=JSON.stringify(data.stages,null,2);
     if(data.candidate) q("candidate").textContent=JSON.stringify(data.candidate,null,2);
     if(data.transformationRecord) q("record").textContent=JSON.stringify(data.transformationRecord,null,2);
+    q("reviewState").textContent=JSON.stringify({
+      semanticReview:data.semanticReview,
+      lifecycle:data.lifecycle,
+      revisionLineage:data.revisionLineage,
+      agentVersionStatus:data.agentVersionStatus
+    },null,2);
+    if(data.semanticReview?.decision==="REQUEST_CHANGES" && !data.revisionLineage?.some(x=>x.parent_transformation_id===id)){
+      q("revisionButton").classList.remove("hidden");
+    } else {
+      q("revisionButton").classList.add("hidden");
+    }
+    if(data.semanticReview) q("reviewButton").disabled=true;
     if(!["QUEUED","PROCESSING"].includes(data.status)) return;
     await new Promise(r=>setTimeout(r,1000));
   }
   q("record").textContent="Polling timed out. Refresh status from the API.";
 }
+
+q("reviewButton").onclick=async()=>{
+  if(!currentTransformationId)return;
+  q("reviewError").textContent="";
+  try{
+    const decision=q("reviewDecision").value;
+    const payload={
+      decision,
+      rationale:q("reviewRationale").value,
+      requestedChanges:decision==="REQUEST_CHANGES"?q("requestedChanges").value:undefined
+    };
+    await api("/v1/transformations/"+currentTransformationId+"/review",{method:"POST",body:JSON.stringify(payload)});
+    await poll(currentTransformationId);
+  }catch(e){q("reviewError").textContent=e.message;}
+};
+q("revisionButton").onclick=async()=>{
+  if(!currentTransformationId)return;
+  q("reviewError").textContent="";
+  try{
+    const data=await api("/v1/transformations/"+currentTransformationId+"/revisions",{method:"POST",body:"{}"});
+    currentTransformationId=data.transformationId;
+    q("reviewButton").disabled=false;
+    q("reviewRationale").value="";
+    q("requestedChanges").value="";
+    await poll(currentTransformationId);
+  }catch(e){q("reviewError").textContent=e.message;}
+};
+
 restore();
 </script>
 </body></html>`;
