@@ -1,0 +1,19 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"https://foundry.frankai.online/schemas/release/1.0/manifest.schema.json",
+ "title":"Agent Foundry Release Manifest v1.0",
+ "type":"object","additionalProperties":false,
+ "required":["release_id","agent","release_version","aps_version","status","rights_status","artifacts","evaluations","package_sha256","released_at"],
+ "properties":{
+  "release_id":{"type":"string","minLength":1},
+  "agent":{"type":"object","required":["id","version"],"properties":{"id":{"type":"string"},"version":{"type":"string"}}},
+  "release_version":{"type":"string","minLength":1},
+  "aps_version":{"type":"string","minLength":1},
+  "status":{"const":"RELEASED"},
+  "rights_status":{"enum":["VERIFIED","UNVERIFIED","RESTRICTED","PROHIBITED"]},
+  "artifacts":{"type":"array","minItems":1,"items":{"type":"object","required":["path","sha256","type"],"properties":{"path":{"type":"string"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"type":{"enum":["APS","RUNTIME","COMPILATION_MANIFEST","EVALUATION","PROVENANCE"]}}}},
+  "evaluations":{"type":"array","minItems":1,"items":{"type":"object","required":["run_id","outcome"],"properties":{"run_id":{"type":"string"},"outcome":{"enum":["PASS","PARTIAL","FAIL","NOT_APPLICABLE","NOT_TESTED"]}}}},
+  "package_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+  "released_at":{"type":"string","format":"date-time"}
+ }
+}
