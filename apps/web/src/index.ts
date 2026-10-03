@@ -1,0 +1,122 @@
+import { createServer } from "node:http";
+
+const port = Number(process.env.WEB_PORT ?? 3000);
+const apiBase = process.env.API_PUBLIC_URL ?? "http://localhost:3001";
+
+const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Agent Foundry</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color:#151515;background:#f4f5f7}
+body{margin:0}.shell{max-width:1080px;margin:0 auto;padding:32px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
+h1{margin:0;font-size:28px}.sub{color:#656b76}
+.card{background:white;border:1px solid #dfe3e8;border-radius:14px;padding:20px;margin-bottom:18px;box-shadow:0 2px 10px rgba(0,0,0,.04)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+label{display:block;font-size:13px;font-weight:650;margin-bottom:6px}
+input,select,textarea,button{font:inherit}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #c9ced6;border-radius:8px;padding:10px;background:white}
+textarea{min-height:260px;resize:vertical}button{border:0;border-radius:8px;padding:10px 15px;background:#151515;color:white;cursor:pointer;font-weight:650}button[disabled]{opacity:.5;cursor:not-allowed}
+.badge{display:inline-block;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:700;background:#eceff3}
+pre{white-space:pre-wrap;word-break:break-word;background:#101317;color:#e7edf4;border-radius:10px;padding:16px;max-height:520px;overflow:auto}
+.hidden{display:none}.error{color:#a21d1d}.ok{color:#176a3a}
+@media(max-width:720px){.grid{grid-template-columns:1fr}.shell{padding:18px}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header><div><h1>Agent Foundry</h1><div class="sub">Governed agent engineering</div></div><span id="sessionBadge" class="badge">Signed out</span></header>
+
+<section id="loginCard" class="card">
+<h2>Sign in</h2>
+<div class="grid">
+<div><label>Email</label><input id="email" type="email" autocomplete="username" /></div>
+<div><label>Password</label><input id="password" type="password" autocomplete="current-password" /></div>
+</div>
+<p><button id="loginButton">Sign in</button></p>
+<div id="loginError" class="error"></div>
+</section>
+
+<section id="intakeCard" class="card hidden">
+<h2>New agent intake</h2>
+<div class="grid">
+<div><label>Project</label><select id="project"></select></div>
+<div><label>Agent name</label><input id="name" placeholder="Automation Governance Architect" /></div>
+<div><label>Agent class</label><select id="agentClass">
+<option>specialist</option><option>advisor</option><option>analyst</option><option>builder</option>
+<option>orchestrator</option><option>monitor</option><option>communicator</option><option>reviewer</option>
+</select></div>
+<div><label>Source rights</label><select id="rights">
+<option>UNVERIFIED</option><option>VERIFIED</option><option>RESTRICTED</option><option>PROHIBITED</option>
+</select></div>
+</div>
+<p><label>Source prompt</label><textarea id="sourcePrompt" placeholder="Paste the source agent prompt here..."></textarea></p>
+<p><button id="submitButton">Create governed candidate</button></p>
+<div id="intakeError" class="error"></div>
+</section>
+
+<section id="statusCard" class="card hidden">
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+<h2>Transformation</h2><span id="statusBadge" class="badge">QUEUED</span>
+</div>
+<div id="statusMeta" class="sub"></div>
+<h3>Candidate APS</h3><pre id="candidate">Waiting for worker…</pre>
+<h3>Transformation record</h3><pre id="record">Waiting for worker…</pre>
+</section>
+</div>
+<script>
+const API=${JSON.stringify(apiBase)};
+let token=sessionStorage.getItem("foundry_token");
+const q=(id)=>document.getElementById(id);
+async function api(path,options={}){
+  const headers={"content-type":"application/json",...(options.headers||{})};
+  if(token) headers.authorization="Bearer "+token;
+  const res=await fetch(API+path,{...options,headers});
+  const body=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(body.error||("HTTP "+res.status));
+  return body;
+}
+function showApp(data){
+  q("loginCard").classList.add("hidden");q("intakeCard").classList.remove("hidden");
+  q("sessionBadge").textContent=data.user.email;
+  const select=q("project");select.innerHTML="";
+  for(const ws of data.workspaces) for(const p of ws.projects){
+    const o=document.createElement("option");o.value=p.id;o.textContent=ws.name+" / "+p.name;select.appendChild(o);
+  }
+}
+async function restore(){if(!token)return;try{showApp(await api("/v1/me"));}catch{token=null;sessionStorage.removeItem("foundry_token");}}
+q("loginButton").onclick=async()=>{q("loginError").textContent="";try{
+  const data=await api("/v1/auth/login",{method:"POST",body:JSON.stringify({email:q("email").value,password:q("password").value})});
+  token=data.token;sessionStorage.setItem("foundry_token",token);showApp(data);
+}catch(e){q("loginError").textContent=e.message;}};
+q("submitButton").onclick=async()=>{q("intakeError").textContent="";q("submitButton").disabled=true;try{
+  const data=await api("/v1/intake",{method:"POST",body:JSON.stringify({
+    projectId:q("project").value,name:q("name").value,agentClass:q("agentClass").value,
+    rightsStatus:q("rights").value,sourcePrompt:q("sourcePrompt").value
+  })});
+  q("statusCard").classList.remove("hidden");q("statusBadge").textContent=data.status;
+  await poll(data.transformationId);
+}catch(e){q("intakeError").textContent=e.message;}finally{q("submitButton").disabled=false;}};
+async function poll(id){
+  for(let i=0;i<120;i++){
+    const data=await api("/v1/transformations/"+id);
+    q("statusBadge").textContent=data.status;
+    q("statusMeta").textContent=[data.registryId,data.version,data.candidateSha256].filter(Boolean).join(" · ");
+    if(data.candidate) q("candidate").textContent=JSON.stringify(data.candidate,null,2);
+    if(data.transformationRecord) q("record").textContent=JSON.stringify(data.transformationRecord,null,2);
+    if(!["QUEUED","PROCESSING"].includes(data.status)) return;
+    await new Promise(r=>setTimeout(r,1000));
+  }
+  q("record").textContent="Polling timed out. Refresh status from the API.";
+}
+restore();
+</script>
+</body></html>`;
+
+createServer((req,res)=>{
+  if(req.url!=="/" && req.url!=="/index.html"){res.writeHead(404);res.end("Not found");return;}
+  res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store"});
+  res.end(html);
+}).listen(port,()=>console.log(`agent-foundry-web listening on :${port}`));

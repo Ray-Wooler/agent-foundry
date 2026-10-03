@@ -2,12 +2,6 @@ name: Evaluation Integrity
 
 on:
   pull_request:
-    paths:
-      - "schemas/evaluation/**"
-      - "scripts/validate_evaluation.py"
-      - "tests/fixtures/evaluation/**"
-      - "docs/architecture/ADR/0007-evaluation-framework.md"
-      - ".github/workflows/evaluation-integrity.yml"
   push:
     branches: [main]
     paths:

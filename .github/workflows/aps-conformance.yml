@@ -2,12 +2,6 @@ name: APS Conformance
 
 on:
   pull_request:
-    paths:
-      - "schemas/**"
-      - "specification/**"
-      - "scripts/validate_aps.py"
-      - "tests/fixtures/aps/**"
-      - ".github/workflows/aps-conformance.yml"
   push:
     branches: [main]
     paths:

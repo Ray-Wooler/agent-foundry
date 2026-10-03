@@ -2,15 +2,6 @@ name: Release Integrity
 
 on:
   pull_request:
-    paths:
-      - "schemas/release/**"
-      - "scripts/package_release.py"
-      - "scripts/verify_release.py"
-      - "tests/fixtures/release/**"
-      - "agents/**/evaluations/**"
-      - "agents/**/agent.aps.json"
-      - "docs/architecture/ADR/0009-immutable-release-packaging.md"
-      - ".github/workflows/release-integrity.yml"
   push:
     branches: [main]
     paths:
