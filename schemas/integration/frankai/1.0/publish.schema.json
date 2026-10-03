@@ -1,0 +1,19 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://foundry.frankai.online/schemas/integration/frankai/1.0/publish.schema.json",
+  "title":"FrankAI Agent Publication Contract v1.0",
+  "type":"object","additionalProperties":false,
+  "required":["contract_version","release","agent","aps_version","package_sha256","runtime_targets","capabilities","evaluation","rights_status"],
+  "properties":{
+    "contract_version":{"const":"1.0"},
+    "release":{"type":"object","required":["release_id","release_version","status"],"properties":{"release_id":{"type":"string"},"release_version":{"type":"string"},"status":{"const":"RELEASED"}}},
+    "agent":{"type":"object","required":["id","version"],"properties":{"id":{"type":"string"},"version":{"type":"string"}}},
+    "aps_version":{"type":"string"},
+    "package_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+    "runtime_targets":{"type":"array","minItems":1,"items":{"enum":["generic","openai"]}},
+    "capabilities":{"type":"array","items":{"type":"string"}},
+    "evaluation":{"type":"object","required":["required_outcome","observed_outcome","run_ids"],"properties":{"required_outcome":{"enum":["PASS","PARTIAL"]},"observed_outcome":{"enum":["PASS","PARTIAL","FAIL","NOT_APPLICABLE","NOT_TESTED"]},"run_ids":{"type":"array","minItems":1,"items":{"type":"string"}}}},
+    "rights_status":{"enum":["VERIFIED","RESTRICTED"]},
+    "published_at":{"type":"string","format":"date-time"}
+  }
+}

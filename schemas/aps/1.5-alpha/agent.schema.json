@@ -4,76 +4,329 @@
   "title": "Agent Prompt Specification v1.5-alpha",
   "type": "object",
   "additionalProperties": false,
-  "required": ["aps_version", "agent", "mandate", "capabilities", "governance"],
+  "required": [
+    "aps_version",
+    "agent",
+    "mandate",
+    "capabilities",
+    "governance"
+  ],
   "properties": {
-    "aps_version": { "const": "1.5-alpha" },
+    "aps_version": {
+      "const": "1.5-alpha"
+    },
     "agent": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "version", "class"],
+      "required": [
+        "id",
+        "name",
+        "version",
+        "class"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "name": { "type": "string", "minLength": 1 },
-        "version": { "type": "string", "minLength": 1 },
-        "class": {
-          "enum": ["orchestrator", "specialist", "builder", "analyst", "advisor", "monitor", "communicator", "reviewer"]
+        "id": {
+          "type": "string",
+          "minLength": 1
         },
-        "description": { "type": "string" }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "class": {
+          "enum": [
+            "orchestrator",
+            "specialist",
+            "builder",
+            "analyst",
+            "advisor",
+            "monitor",
+            "communicator",
+            "reviewer"
+          ]
+        },
+        "description": {
+          "type": "string"
+        }
       }
     },
     "mandate": {
       "type": "object",
-      "required": ["purpose", "primary_objective"],
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "primary_objective"
+      ],
       "properties": {
-        "purpose": { "type": "string", "minLength": 1 },
-        "primary_objective": { "type": "string", "minLength": 1 },
-        "secondary_objectives": { "type": "array", "items": { "type": "string" } },
-        "non_goals": { "type": "array", "items": { "type": "string" } }
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primary_objective": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondary_objectives": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "non_goals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "capabilities": {
       "type": "array",
-      "items": { "$ref": "#/$defs/capability" }
+      "items": {
+        "$ref": "common.schema.json#/$defs/capability"
+      }
     },
     "governance": {
       "type": "object",
-      "required": ["authority"],
+      "additionalProperties": false,
+      "required": [
+        "authority"
+      ],
       "properties": {
-        "authority": { "$ref": "#/$defs/authority" },
-        "policies": { "type": "array", "items": { "type": "string" } }
+        "authority": {
+          "$ref": "common.schema.json#/$defs/authority"
+        },
+        "policies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "retrieved_content_is_data": {
+          "type": "boolean"
+        }
       }
     },
-    "epistemic": { "type": "object" },
-    "operational": { "type": "object" },
-    "extensions": { "type": "object" }
-  },
-  "$defs": {
-    "capability": {
+    "epistemic": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "description"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "description": { "type": "string", "minLength": 1 },
-        "inputs": { "type": "array", "items": { "type": "string" } },
-        "outputs": { "type": "array", "items": { "type": "string" } },
-        "preconditions": { "type": "array", "items": { "type": "string" } },
-        "required_permissions": { "type": "array", "items": { "type": "string" } },
-        "side_effect_classes": { "type": "array", "items": { "type": "string" } },
-        "evidence_requirements": { "type": "array", "items": { "type": "string" } },
-        "acceptance_criteria": { "type": "array", "items": { "type": "string" } }
+        "claims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "statement",
+              "type",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "enum": [
+                  "observation",
+                  "finding",
+                  "assessment",
+                  "attribution",
+                  "forecast",
+                  "recommendation"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "PROPOSED",
+                  "SUPPORTED",
+                  "DISPUTED",
+                  "SUPERSEDED",
+                  "WITHDRAWN"
+                ]
+              },
+              "evidence_for": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "evidence_against": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "assumptions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "confidence": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "temporal_validity": {
+                "$ref": "common.schema.json#/$defs/temporalValidity"
+              },
+              "corroborated": {
+                "type": "boolean"
+              },
+              "source_lineages": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "freshness_material": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
       }
     },
-    "authority": {
+    "operational": {
       "type": "object",
-      "required": ["recommendation", "execution", "delegation"],
+      "additionalProperties": false,
       "properties": {
-        "recommendation": { "type": "array", "items": { "type": "string" } },
-        "execution": { "type": "array", "items": { "type": "string" } },
-        "delegation": { "type": "array", "items": { "type": "string" } },
-        "approval_required": { "type": "array", "items": { "type": "string" } },
-        "prohibited": { "type": "array", "items": { "type": "string" } }
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "operations"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "operations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "permission": {
+                      "type": "string"
+                    },
+                    "authority": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "side_effects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "consequence"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "consequence": {
+                "enum": [
+                  "NONE",
+                  "LOW",
+                  "MODERATE",
+                  "HIGH",
+                  "CRITICAL"
+                ]
+              },
+              "authority_grant": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "persistent_state": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "authoritative_store": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "executions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "PROPOSED",
+                  "IMPLEMENTED",
+                  "TESTED",
+                  "VERIFIED",
+                  "DEPLOYED",
+                  "OBSERVED"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verification_evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
       }
+    },
+    "extensions": {
+      "type": "object"
+    },
+    "imported_content": {
+      "type": "boolean"
     }
   }
 }

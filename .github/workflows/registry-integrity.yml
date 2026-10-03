@@ -1,0 +1,44 @@
+name: Registry Integrity
+
+on:
+  pull_request:
+    paths:
+      - "migrations/**"
+      - "tests/sql/**"
+      - "docs/architecture/ADR/0005-registry-persistence.md"
+      - ".github/workflows/registry-integrity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "migrations/**"
+      - "tests/sql/**"
+
+permissions:
+  contents: read
+
+jobs:
+  registry-integrity:
+    name: Registry Integrity
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: foundry
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply registry migration
+        run: psql -h localhost -U foundry -d foundry_test -v ON_ERROR_STOP=1 -f migrations/0001_registry.sql
+      - name: Run registry integrity tests
+        run: psql -h localhost -U foundry -d foundry_test -v ON_ERROR_STOP=1 -f tests/sql/registry_integrity.sql

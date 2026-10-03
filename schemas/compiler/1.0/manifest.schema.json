@@ -1,0 +1,18 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema",
+ "$id":"https://foundry.frankai.online/schemas/compiler/1.0/manifest.schema.json",
+ "title":"Agent Foundry Compilation Manifest v1.0",
+ "type":"object","additionalProperties":false,
+ "required":["compilation_id","agent_version","aps_version","target","compiler_version","source_sha256","artifact_sha256","artifact_path"],
+ "properties":{
+  "compilation_id":{"type":"string","minLength":1},
+  "agent_version":{"type":"string","minLength":1},
+  "aps_version":{"type":"string","minLength":1},
+  "target":{"enum":["generic","openai"]},
+  "compiler_version":{"type":"string","minLength":1},
+  "source_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+  "artifact_sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+  "artifact_path":{"type":"string","minLength":1},
+  "warnings":{"type":"array","items":{"type":"string"}}
+ }
+}
