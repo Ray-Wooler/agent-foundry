@@ -44,12 +44,12 @@ jobs:
       MOCK_FRANKAI_PORT: "4010"
       MOCK_FRANKAI_URL: http://127.0.0.1:4010
       FRANKAI_REGISTRY_URL: http://127.0.0.1:4010/v1/agent-releases
-      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:9000
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:4566
       OBJECT_STORAGE_REGION: us-east-1
       OBJECT_STORAGE_BUCKET: agent-foundry
       OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
-      OBJECT_STORAGE_ACCESS_KEY: minioadmin
-      OBJECT_STORAGE_SECRET_KEY: minioadmin123
+      OBJECT_STORAGE_ACCESS_KEY: test
+      OBJECT_STORAGE_SECRET_KEY: test
       APP_VERSION: phase7-ci
       TENANT_ISOLATION_PASSWORD: phase7-tenant-password
       ACME_EMAIL: ci@example.com
@@ -84,19 +84,20 @@ jobs:
           echo grafana-secret-password | sudo tee /etc/agent-foundry/secrets/grafana_admin_password >/dev/null
           BOOTSTRAP_ADMIN_EMAIL=admin@example.com BOOTSTRAP_WORKSPACE_NAME=Production APP_VERSION=phase7-ci \
           PROMPTFORGE_PROVIDER=deterministic OPENAI_MODEL=ci-model FRANKAI_REGISTRY_URL=http://frankai.invalid \
-          ACME_EMAIL=ci@example.com docker compose -f compose.production.yml config >/tmp/compose-rendered.yml
+          OBJECT_STORAGE_ENDPOINT=https://s3.example.invalid OBJECT_STORAGE_REGION=us-east-1 OBJECT_STORAGE_BUCKET=agent-foundry \
+          OBJECT_STORAGE_FORCE_PATH_STYLE=false ACME_EMAIL=ci@example.com \
+          docker compose -f compose.production.yml config >/tmp/compose-rendered.yml
       - name: Apply database migrations
         run: pnpm db:migrate
-      - name: Start MinIO and initialize bucket
+      - name: Start S3 emulator and initialize bucket
         shell: bash
         run: |
-          docker run -d --name phase7-minio -p 9000:9000 -p 9001:9001 \
-            -e MINIO_ROOT_USER="$OBJECT_STORAGE_ACCESS_KEY" \
-            -e MINIO_ROOT_PASSWORD="$OBJECT_STORAGE_SECRET_KEY" \
-            minio/minio:RELEASE.2025-07-23T15-54-02Z server /data --console-address ":9001"
-          for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then break; fi
-            if [ "$i" -eq 40 ]; then docker logs phase7-minio; exit 1; fi
+          docker run -d --name phase7-s3 -p 4566:4566 \
+            -e SERVICES=s3 \
+            localstack/localstack:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4566/_localstack/health >/dev/null; then break; fi
+            if [ "$i" -eq 60 ]; then docker logs phase7-s3; exit 1; fi
             sleep 0.5
           done
           node scripts/init_object_storage.mjs
@@ -108,7 +109,7 @@ jobs:
           pnpm --filter @agent-foundry/api start >/tmp/foundry-api.log 2>&1 & API_PID=$!
           pnpm --filter @agent-foundry/worker start >/tmp/foundry-worker.log 2>&1 & WORKER_PID=$!
           pnpm --filter @agent-foundry/web start >/tmp/foundry-web.log 2>&1 & WEB_PID=$!
-          cleanup() { kill "$MOCK_PID" "$API_PID" "$WORKER_PID" "$WEB_PID" 2>/dev/null || true; docker rm -f phase7-minio >/dev/null 2>&1 || true; }
+          cleanup() { kill "$MOCK_PID" "$API_PID" "$WORKER_PID" "$WEB_PID" 2>/dev/null || true; docker rm -f phase7-s3 >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           for i in $(seq 1 60); do
             if curl -fsS http://localhost:3001/ready >/dev/null && curl -fsS http://localhost:3000/ready >/dev/null && curl -fsS http://127.0.0.1:4010/_state >/dev/null; then break; fi
