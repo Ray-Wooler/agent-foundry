@@ -21,7 +21,7 @@ Phase 6 is not accepted until Controlled Distribution passes on the exact PR hea
 
 ## Phase 6 Decision
 
-**CONTROLLED PACKAGING, PUBLICATION & FRANKAI REGISTRATION PASS / VERIFIED / AWAITING ENFORCEMENT**
+**CONTROLLED PACKAGING, PUBLICATION & FRANKAI REGISTRATION PASS / VERIFIED / ENFORCED**
 
 Evidence from Controlled Distribution run `37126928728`:
 
@@ -43,3 +43,5 @@ Evidence from Controlled Distribution run `37126928728`:
 - append-only audit evidence exists for package creation, publication and FrankAI registration.
 
 Phase 6 preserves the AgentVersion as `CERTIFIED`; packaging/publication/registration state is tracked separately.
+
+Enforcement: Protect Main ruleset 24352789 requires Controlled Distribution in addition to the twelve previously enforced checks.
