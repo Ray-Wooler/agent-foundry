@@ -51,7 +51,7 @@ Metrics include operational queue state, artifact durability state, worker heart
 
 ## Backup and Recovery
 
-Database backups use pg_dump custom format plus SHA-256. Object storage is mirrored when the MinIO client is available. Backup archives are checksummed and restore-tested in CI.
+Database backups use pg_dump custom format plus SHA-256. Object storage is mirrored when the S3-compatible object storage client is available. Backup archives are checksummed and restore-tested in CI.
 
 ## Deployment
 
