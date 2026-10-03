@@ -67,6 +67,34 @@ const security=await query(
 );
 assert(security.rowCount===1,"dead-letter must emit a security event");
 
+// Prove an abandoned RUNNING lease is reclaimed rather than stuck forever.
+const staleJob=await query(
+  `INSERT INTO operational_jobs(
+     workspace_id,job_type,payload,status,attempts,max_attempts,locked_at,locked_by
+   ) VALUES ($1,'STORE_ARTIFACT','{}'::jsonb,'RUNNING',1,2,now()-interval '10 minutes','dead-worker')
+   RETURNING id`,
+  [workspaceId],
+);
+const staleJobId=staleJob.rows[0].id;
+let staleState;
+for(let i=0;i<80;i++){
+  staleState=await query(
+    "SELECT status,attempts,last_error,locked_by FROM operational_jobs WHERE id=$1",
+    [staleJobId],
+  );
+  if(staleState.rows[0]?.status==="DEAD")break;
+  await new Promise(r=>setTimeout(r,250));
+}
+assert(staleState.rows[0]?.status==="DEAD","expired RUNNING operational job must be reclaimed and dead-lettered");
+assert(staleState.rows[0]?.attempts===2,"reclaimed RUNNING job must consume the next bounded attempt");
+const staleSecurity=await query(
+  `SELECT 1 FROM security_events
+   WHERE event_type='operational_job_dead_letter'
+     AND subject_id=$1`,
+  [staleJobId],
+);
+assert(staleSecurity.rowCount===1,"expired RUNNING dead-letter must emit a security event");
+
 // Create a second tenant/workspace and prove cross-workspace reads fail.
 const target=await query(
   `SELECT t.id transformation_id,t.agent_version_id
