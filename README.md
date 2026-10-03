@@ -179,3 +179,43 @@ Built-in Phase 4 suites:
 
 - `core-governance-v1` — machine assertions over canonical APS boundaries;
 - `human-semantic-quality-v1` — required human evaluation evidence.
+
+
+## Phase 5 Certification Authority
+
+Certification and release approval are now explicit, separate authority stages:
+
+```text
+EVALUATED + PASS + readiness ELIGIBLE
+                |
+                v
+       Certification Authority
+          /             \
+      CERTIFY           DENY
+         |                |
+         v                v
+     CERTIFIED         EVALUATED
+         |
+         v
+      Release Approval
+        /       \
+    APPROVE     DENY
+       |          |
+       v          v
+ release ELIGIBLE  blocked
+       |
+       v
+   Packaging
+       |
+       v
+   Publication
+       |
+       v
+ FrankAI Registration
+```
+
+Certification records preserve the exact APS digest, PASS aggregate, evidence bundle, certifier identity/role, decision and rationale.
+
+Release approval snapshots distribution rights and intended distribution. Approval only authorizes the next packaging stage; it does not package, publish, or register automatically.
+
+Packaging, publication and FrankAI registration use distinct records. The AgentVersion remains `CERTIFIED` throughout later release stages.
