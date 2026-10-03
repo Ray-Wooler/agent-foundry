@@ -58,7 +58,7 @@ Record evidence for:
 - web login page loads.
 - worker heartbeat age < 60 seconds.
 - PostgreSQL healthy.
-- MinIO healthy and bucket versioning enabled.
+- S3-compatible object storage healthy and bucket versioning enabled.
 - durable artifact write reaches STORED.
 - Prometheus target healthy.
 - Grafana dashboard loads through an operator-only access path.
