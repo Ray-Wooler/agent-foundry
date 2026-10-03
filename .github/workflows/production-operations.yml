@@ -44,7 +44,7 @@ jobs:
       MOCK_FRANKAI_PORT: "4010"
       MOCK_FRANKAI_URL: http://127.0.0.1:4010
       FRANKAI_REGISTRY_URL: http://127.0.0.1:4010/v1/agent-releases
-      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:4566
+      OBJECT_STORAGE_ENDPOINT: http://127.0.0.1:5000
       OBJECT_STORAGE_REGION: us-east-1
       OBJECT_STORAGE_BUCKET: agent-foundry
       OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
@@ -92,12 +92,12 @@ jobs:
       - name: Start S3 emulator and initialize bucket
         shell: bash
         run: |
-          docker run -d --name phase7-s3 -p 4566:4566 \
-            -e SERVICES=s3 \
-            localstack/localstack:latest
+          python -m pip install "moto[server,s3]==5.2.3"
+          nohup moto_server -H 127.0.0.1 -p 5000 >/tmp/moto-s3.log 2>&1 &
+          echo $! >/tmp/moto-s3.pid
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:4566/_localstack/health >/dev/null; then break; fi
-            if [ "$i" -eq 60 ]; then docker logs phase7-s3; exit 1; fi
+            if curl -fsS http://127.0.0.1:5000/ >/dev/null; then break; fi
+            if [ "$i" -eq 60 ]; then cat /tmp/moto-s3.log; exit 1; fi
             sleep 0.5
           done
           node scripts/init_object_storage.mjs
@@ -140,4 +140,6 @@ jobs:
 
       - name: Cleanup S3 emulator
         if: always()
-        run: docker rm -f phase7-s3 >/dev/null 2>&1 || true
+        shell: bash
+        run: |
+          if [ -f /tmp/moto-s3.pid ]; then kill "$(cat /tmp/moto-s3.pid)" 2>/dev/null || true; fi
