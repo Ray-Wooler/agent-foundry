@@ -13,7 +13,7 @@ These are operational targets, not guarantees.
 A full recovery set includes:
 1. PostgreSQL custom-format dump.
 2. SHA-256 checksum for the dump.
-3. S3/MinIO artifact mirror when available.
+3. S3/S3-compatible object storage artifact mirror when available.
 4. compressed recovery archive.
 5. SHA-256 checksum for the recovery archive.
 6. deployment commit SHA and production environment metadata.
@@ -38,7 +38,7 @@ Copy the verified archive and checksum off-host.
 2. Install Docker Engine and Compose.
 3. Checkout the authoritative GitHub commit.
 4. Restore secret files under `/etc/agent-foundry/secrets`.
-5. Start PostgreSQL and MinIO only.
+5. Start PostgreSQL and external S3-compatible object storage only.
 6. Set the target DATABASE_URL.
 7. Run:
    ```bash
