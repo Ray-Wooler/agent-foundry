@@ -28,6 +28,11 @@ const agentClasses = new Set([
 ]);
 const rightsStatuses = new Set<RightsStatus>(["VERIFIED","UNVERIFIED","RESTRICTED","PROHIBITED"]);
 
+function textResponse(res: ServerResponse,status:number,body:string,contentType="text/plain; charset=utf-8"){
+  res.writeHead(status,{"content-type":contentType,"content-length":Buffer.byteLength(body)});
+  res.end(body);
+}
+
 function json(res: ServerResponse, status: number, value: unknown) {
   const body = JSON.stringify(value);
   res.writeHead(status, {
@@ -312,6 +317,53 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   if (req.method === "GET" && url.pathname === "/health") {
     const db = await query<{ now: string }>("SELECT now()::text AS now");
     return json(res, 200, { status: "ok", service: "agent-foundry-api", database: db.rows[0]?.now });
+  }
+
+  if (req.method === "GET" && url.pathname === "/ready") {
+    try {
+      const db=await query<{migration_count:string}>(
+        "SELECT count(*)::text migration_count FROM app_schema_migrations"
+      );
+      return json(res,200,{
+        status:"ready",
+        service:"agent-foundry-api",
+        version:process.env.APP_VERSION??"dev",
+        migrations:Number(db.rows[0]?.migration_count??0),
+      });
+    } catch(error) {
+      return json(res,503,{status:"not_ready",error:error instanceof Error?error.message:String(error)});
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/metrics") {
+    const jobs=await query<{status:string;count:string}>(
+      "SELECT status,count(*)::text count FROM operational_jobs GROUP BY status"
+    );
+    const artifacts=await query<{storage_status:string;count:string}>(
+      "SELECT storage_status,count(*)::text count FROM artifact_objects GROUP BY storage_status"
+    );
+    const heartbeat=await query<{age_seconds:string|null}>(
+      "SELECT extract(epoch from (now()-max(last_seen_at)))::text age_seconds FROM worker_heartbeats"
+    );
+    const security=await query<{severity:string;count:string}>(
+      "SELECT severity,count(*)::text count FROM security_events GROUP BY severity"
+    );
+    const lines=[
+      "# HELP agent_foundry_operational_jobs Operational job counts by status",
+      "# TYPE agent_foundry_operational_jobs gauge",
+      ...jobs.rows.map(r=>`agent_foundry_operational_jobs{status="${r.status}"} ${r.count}`),
+      "# HELP agent_foundry_artifacts Artifact counts by durability status",
+      "# TYPE agent_foundry_artifacts gauge",
+      ...artifacts.rows.map(r=>`agent_foundry_artifacts{status="${r.storage_status}"} ${r.count}`),
+      "# HELP agent_foundry_worker_heartbeat_age_seconds Age of the latest worker heartbeat",
+      "# TYPE agent_foundry_worker_heartbeat_age_seconds gauge",
+      `agent_foundry_worker_heartbeat_age_seconds ${heartbeat.rows[0]?.age_seconds??"-1"}`,
+      "# HELP agent_foundry_security_events Security events by severity",
+      "# TYPE agent_foundry_security_events gauge",
+      ...security.rows.map(r=>`agent_foundry_security_events{severity="${r.severity}"} ${r.count}`),
+      "",
+    ];
+    return textResponse(res,200,lines.join("\n"),"text/plain; version=0.0.4; charset=utf-8");
   }
 
   if (req.method === "POST" && url.pathname === "/v1/auth/login") {
