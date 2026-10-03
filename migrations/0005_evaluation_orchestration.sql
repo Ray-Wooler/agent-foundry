@@ -125,6 +125,35 @@ CREATE TRIGGER trg_evaluated_requires_completed_plan
 BEFORE UPDATE ON agent_versions
 FOR EACH ROW EXECUTE FUNCTION require_completed_evaluation_for_evaluated();
 
+
+CREATE OR REPLACE FUNCTION enforce_phase4_evaluation_lifecycle()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+  IF NEW.status=OLD.status THEN
+    RETURN NEW;
+  END IF;
+
+  IF OLD.status='CANDIDATE'
+     AND NEW.status NOT IN ('VALIDATED','REJECTED','SUPERSEDED','RETIRED','QUARANTINED') THEN
+    RAISE EXCEPTION 'CANDIDATE must transition through VALIDATED before further evaluation lifecycle states';
+  END IF;
+
+  IF OLD.status='VALIDATED'
+     AND NEW.status NOT IN ('EVALUATED','REJECTED','SUPERSEDED','RETIRED','QUARANTINED') THEN
+    RAISE EXCEPTION 'VALIDATED must transition through EVALUATED before later lifecycle states';
+  END IF;
+
+  IF NEW.status='CERTIFIED' AND OLD.status<>'CERTIFIED' THEN
+    RAISE EXCEPTION 'CERTIFIED transition requires a separate certification workflow';
+  END IF;
+
+  RETURN NEW;
+END $;
+
+CREATE TRIGGER trg_phase4_evaluation_lifecycle
+BEFORE UPDATE ON agent_versions
+FOR EACH ROW EXECUTE FUNCTION enforce_phase4_evaluation_lifecycle();
+
 CREATE OR REPLACE FUNCTION validate_certification_readiness_insert()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
