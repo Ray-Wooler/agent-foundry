@@ -110,3 +110,29 @@ OPENAI_MODEL=...
 ```
 
 CI uses the deterministic provider through the same engine contract and separately tests the OpenAI Responses API adapter against a local protocol mock.
+
+
+## Phase 3 Review Governance
+
+PromptForge candidates now enter an explicit human semantic-review workflow:
+
+```text
+DRAFT / REQUIRES_REVIEW
+        |
+        v
+ Human semantic review
+   /       |        \
+APPROVE  REJECT  REQUEST_CHANGES
+  |         |          |
+  v         v          v
+CANDIDATE  DRAFT   New DRAFT revision
+Eval READY NOT_READY Same Agent identity
+Cert N/E   Cert N/E New AgentVersion
+Release N/E Release N/E Immutable lineage
+```
+
+Review records bind reviewer identity, workspace role, rationale and the exact candidate digest. They are immutable.
+
+A semantic approval only makes the candidate eligible to enter evaluation. It does not certify or release the agent.
+
+A request for changes never mutates the reviewed APS. It creates a new PromptForge transformation using the same immutable source artifact plus separately recorded reviewer guidance, producing a new AgentVersion under the same Agent registry identity.
