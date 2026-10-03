@@ -18,6 +18,20 @@ export type ObjectStorageConfig = {
   forcePathStyle: boolean;
 };
 
+export function assertSafeObjectKeySegment(value:string,name="object key segment") {
+  if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
+    throw new Error(`${name} must be a safe single path segment`);
+  }
+  return value;
+}
+
+export function assertSafeObjectKey(key:string) {
+  if(!key || key.startsWith("/") || key.includes("\\") || key.split("/").some(segment=>!segment || segment==="." || segment==="..")) {
+    throw new Error("object key must be a relative slash-delimited path without traversal segments");
+  }
+  return key;
+}
+
 export function storageConfigFromEnvironment(): ObjectStorageConfig {
   const bucket=process.env.OBJECT_STORAGE_BUCKET;
   const accessKeyId=process.env.OBJECT_STORAGE_ACCESS_KEY;
@@ -55,6 +69,7 @@ export class ArtifactStore {
   }
 
   async putText(key:string,text:string,mediaType="application/json",expectedSha256?:string) {
+    assertSafeObjectKey(key);
     const sha256=sha256Text(text);
     if(expectedSha256&&expectedSha256!==sha256) {
       throw new Error(`artifact digest mismatch before upload expected=${expectedSha256} actual=${sha256}`);
@@ -79,6 +94,7 @@ export class ArtifactStore {
   }
 
   async head(key:string) {
+    assertSafeObjectKey(key);
     const result=await this.client.send(new HeadObjectCommand({
       Bucket:this.config.bucket,
       Key:key,
@@ -99,6 +115,7 @@ export class ArtifactStore {
   }
 
   async getText(key:string):Promise<string> {
+    assertSafeObjectKey(key);
     const result=await this.client.send(new GetObjectCommand({
       Bucket:this.config.bucket,
       Key:key,

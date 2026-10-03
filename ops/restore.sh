@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+if [ -f "$(dirname "$0")/load-secrets.sh" ]; then . "$(dirname "$0")/load-secrets.sh"; fi
 archive="$1"
 restore_root="${RESTORE_ROOT:-/tmp/agent-foundry-restore}"
 rm -rf "$restore_root"

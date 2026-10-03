@@ -20,6 +20,7 @@ import { ArtifactStore, storageConfigFromEnvironment } from "@agent-foundry/stor
 import { randomUUID } from "node:crypto";
 
 const pollMs = Number(process.env.WORKER_POLL_MS ?? 1000);
+const operationalLeaseSeconds = Number(process.env.OPERATIONAL_JOB_LEASE_SECONDS ?? 300);
 const engine = new PromptForgeEngine(createPromptForgeProviderFromEnvironment());
 const workerId=process.env.WORKER_ID??`worker-${randomUUID()}`;
 let artifactStore:ArtifactStore|null=null;
@@ -547,8 +548,10 @@ async function claimOperationalJob():Promise<OperationalJob|null> {
     const result=await client.query<OperationalJob>(
       `WITH next AS (
          SELECT id FROM operational_jobs
-         WHERE status IN ('QUEUED','RETRY')
-           AND available_at<=now()
+         WHERE (
+           (status IN ('QUEUED','RETRY') AND available_at<=now())
+           OR (status='RUNNING' AND locked_at < now() - ($2::text || ' seconds')::interval)
+         )
          ORDER BY available_at,created_at
          FOR UPDATE SKIP LOCKED
          LIMIT 1
@@ -558,7 +561,7 @@ async function claimOperationalJob():Promise<OperationalJob|null> {
        FROM next
        WHERE j.id=next.id
        RETURNING j.id,j.workspace_id,j.job_type,j.payload,j.attempts,j.max_attempts`,
-      [workerId],
+      [workerId, String(operationalLeaseSeconds)],
     );
     return result.rows[0]??null;
   });

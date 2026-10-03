@@ -33,8 +33,8 @@ const server=createServer(async(req,res)=>{
 
   const response={
     registration_reference:"frankai-reg-"+String(registrations.size+1).padStart(4,"0"),
-    publication_record_id:payload.publicationRecordId,
-    package_sha256:payload.release?.packageSha256,
+    publication_record_id:payload.release?.release_id,
+    package_sha256:payload.package_sha256,
   };
   registrations.set(key,response);
   res.writeHead(201,{"content-type":"application/json"});

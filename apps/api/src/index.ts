@@ -3,6 +3,7 @@ import { URL } from "node:url";
 import { digestSessionToken, issueSessionToken, normalizeEmail, verifyPassword } from "@agent-foundry/auth";
 import { query, transaction } from "@agent-foundry/db";
 import { canonicalJson, sha256Text, type RightsStatus } from "@agent-foundry/domain";
+import { assertSafeObjectKeySegment } from "@agent-foundry/storage";
 import {
   buildReleaseBundle,
   buildPublicationPayload,
@@ -1236,6 +1237,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const releaseVersion=typeof body.releaseVersion==="string"?body.releaseVersion.trim():"";
     const idempotencyKey=typeof body.idempotencyKey==="string"?body.idempotencyKey.trim():"";
     if(!releaseVersion) return json(res,400,{error:"release_version_required"});
+    try { assertSafeObjectKeySegment(releaseVersion,"release_version"); }
+    catch { return json(res,400,{error:"release_version_invalid"}); }
     if(idempotencyKey.length<8) return json(res,400,{error:"idempotency_key_required"});
 
     try {
@@ -1485,6 +1488,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
           channel,
           rightsStatus:item.rights_status,
           runtimeTargets,
+          apsVersion:item.package_manifest?.apsVersion,
+          capabilities:item.package_manifest?.capabilities,
+          evaluationAggregate:item.package_manifest?.evaluationAggregate,
+          evaluationRequiredOutcome:item.package_manifest?.evaluationRequiredOutcome,
+          evaluationRunIds:item.package_manifest?.evaluationRunIds,
         });
 
         const record=await client.query<{id:string}>(
@@ -1611,10 +1619,42 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const registryUrl=process.env.FRANKAI_REGISTRY_URL;
     if(!registryUrl) return json(res,503,{error:"frankai_registry_not_configured"});
 
-    const payload=buildFrankAIRegistrationPayload({
-      publicationRecordId:publicationId,
-      publicationPayload:item.publication_payload,
-    });
+    let payload:any;
+    try {
+      payload=buildFrankAIRegistrationPayload({
+        publicationRecordId:publicationId,
+        publicationPayload:item.publication_payload,
+      });
+    } catch {
+      return json(res,409,{error:"registration_contract_incomplete"});
+    }
+
+    // Claim the stable external effect before leaving the local transaction.
+    // A different caller/key cannot create a second effect for this publication;
+    // a retry with the same key may safely resume an IN_FLIGHT/FAILED attempt.
+    try {
+      await transaction(async(client)=>{
+        const byPublication=await client.query<{idempotency_key:string;status:string}>(
+          "SELECT idempotency_key,status FROM frankai_registration_attempts WHERE publication_record_id=$1 FOR UPDATE",
+          [publicationId],
+        );
+        if(byPublication.rowCount && byPublication.rows[0]!.idempotency_key!==idempotencyKey) {
+          throw new Error("frankai_registration_already_exists");
+        }
+        if(!byPublication.rowCount) {
+          await client.query(
+            `INSERT INTO frankai_registration_attempts(publication_record_id,idempotency_key,request_payload)
+             VALUES ($1,$2,$3::jsonb)`,
+            [publicationId,idempotencyKey,JSON.stringify(payload)],
+          );
+        }
+      });
+    } catch(error) {
+      if(error instanceof Error && error.message==="frankai_registration_already_exists") {
+        return json(res,409,{error:error.message});
+      }
+      throw error;
+    }
 
     let registryResponse:Response;
     try {
@@ -1624,6 +1664,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         body:JSON.stringify(payload),
       });
     } catch {
+      await query(
+        "UPDATE frankai_registration_attempts SET status='FAILED',last_error=$2,updated_at=now() WHERE publication_record_id=$1",
+        [publicationId,"frankai_registry_unreachable"],
+      );
       return json(res,502,{error:"frankai_registry_unreachable"});
     }
 
@@ -1633,6 +1677,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     catch { responsePayload={raw:responseText}; }
 
     if(!registryResponse.ok) {
+      await query(
+        "UPDATE frankai_registration_attempts SET status='FAILED',response_payload=$2::jsonb,last_error=$3,updated_at=now() WHERE publication_record_id=$1",
+        [publicationId,JSON.stringify(responsePayload),`HTTP ${registryResponse.status}`],
+      );
       return json(res,502,{error:"frankai_registry_rejected",status:registryResponse.status,response:responsePayload});
     }
     const registrationReference=typeof responsePayload.registration_reference==="string"
@@ -1640,7 +1688,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       : typeof responsePayload.id==="string"
         ? responsePayload.id
         : null;
-    if(!registrationReference) return json(res,502,{error:"frankai_registry_missing_reference"});
+    if(!registrationReference) {
+      await query(
+        "UPDATE frankai_registration_attempts SET status='FAILED',response_payload=$2::jsonb,last_error=$3,updated_at=now() WHERE publication_record_id=$1",
+        [publicationId,JSON.stringify(responsePayload),"missing registration reference"],
+      );
+      return json(res,502,{error:"frankai_registry_missing_reference"});
+    }
 
     try {
       const result=await transaction(async(client)=>{
@@ -1654,6 +1708,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'REGISTERED')
            RETURNING id`,
           [publicationId,registrationReference,idempotencyKey,JSON.stringify(payload),JSON.stringify(responsePayload)],
+        );
+
+        await client.query(
+          `UPDATE frankai_registration_attempts
+           SET status='REGISTERED',response_payload=$2::jsonb,registration_reference=$3,updated_at=now()
+           WHERE publication_record_id=$1`,
+          [publicationId,JSON.stringify(responsePayload),registrationReference],
         );
 
         const registrationEvidence={request:payload,response:responsePayload,registrationReference};

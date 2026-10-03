@@ -106,10 +106,15 @@ export function buildReleaseBundle(input:ReleaseBundleInput) {
       contractVersion:"1.0",
       releaseVersion:input.releaseVersion,
       agent:{registryId:input.registryId,version:input.agentVersion},
+      agentId:input.registryId,
+      apsVersion:input.aps.aps_version,
+      capabilities:(input.aps.capabilities??[]).map((cap:any)=>String(cap.id??cap.capability_key??cap)),
       apsSha256:input.apsSha256,
       runtimeTargets:runtimes.map(x=>x.target),
       runtimeDigests:Object.fromEntries(runtimes.map(x=>[x.target,x.sha256])),
       evaluationAggregate:input.evaluationPlan.aggregateOutcome,
+      evaluationRequiredOutcome:"PASS",
+      evaluationRunIds:input.evaluationRuns.map(run=>run.id),
       certificationRecordId:input.certification.id,
       releaseApprovalId:input.releaseApproval.id,
       rightsStatus:input.releaseApproval.rightsStatus,
@@ -129,6 +134,11 @@ export function buildPublicationPayload(input:{
   channel:string;
   rightsStatus:string;
   runtimeTargets:string[];
+  apsVersion?:string;
+  capabilities?:string[];
+  evaluationAggregate?:string;
+  evaluationRequiredOutcome?:string;
+  evaluationRunIds?:string[];
 }) {
   return {
     contractVersion:"1.0",
@@ -147,6 +157,11 @@ export function buildPublicationPayload(input:{
     },
     runtimeTargets:input.runtimeTargets,
     rightsStatus:input.rightsStatus,
+    apsVersion:input.apsVersion??"",
+    capabilities:input.capabilities??[],
+    evaluationAggregate:input.evaluationAggregate??"NOT_TESTED",
+    evaluationRequiredOutcome:input.evaluationRequiredOutcome??"PASS",
+    evaluationRunIds:input.evaluationRunIds??[],
   };
 }
 
@@ -154,12 +169,37 @@ export function buildFrankAIRegistrationPayload(input:{
   publicationRecordId:string;
   publicationPayload:any;
 }) {
+  const publication=input.publicationPayload;
+  if(!publication?.agent?.registryId || !publication?.agent?.version
+    || !publication?.release?.releaseId || !publication?.release?.releaseVersion
+    || !/^[a-f0-9]{64}$/.test(String(publication.release.packageSha256??""))
+    || !publication.apsVersion || !Array.isArray(publication.runtimeTargets) || publication.runtimeTargets.length===0
+    || !Array.isArray(publication.capabilities)
+    || !publication.evaluationAggregate || !Array.isArray(publication.evaluationRunIds) || publication.evaluationRunIds.length===0
+    || !["VERIFIED","RESTRICTED"].includes(publication.rightsStatus)) {
+    throw new Error("registration publication payload is incomplete for FrankAI contract v1.0");
+  }
   return {
-    contractVersion:"1.0",
-    publicationRecordId:input.publicationRecordId,
-    agent:input.publicationPayload.agent,
-    release:input.publicationPayload.release,
-    runtimeTargets:input.publicationPayload.runtimeTargets,
-    rightsStatus:input.publicationPayload.rightsStatus,
+    contract_version:"1.0",
+    release:{
+      release_id:input.publicationPayload.release.releaseId,
+      release_version:input.publicationPayload.release.releaseVersion,
+      status:"RELEASED",
+    },
+    agent:{
+      id:input.publicationPayload.agent.registryId,
+      version:input.publicationPayload.agent.version,
+    },
+    aps_version:input.publicationPayload.apsVersion,
+    package_sha256:input.publicationPayload.release.packageSha256,
+    runtime_targets:input.publicationPayload.runtimeTargets,
+    capabilities:input.publicationPayload.capabilities,
+    evaluation:{
+      required_outcome:input.publicationPayload.evaluationRequiredOutcome,
+      observed_outcome:input.publicationPayload.evaluationAggregate,
+      run_ids:input.publicationPayload.evaluationRunIds,
+    },
+    rights_status:input.publicationPayload.rightsStatus,
+    published_at:new Date().toISOString(),
   };
 }

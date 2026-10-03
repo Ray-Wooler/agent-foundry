@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+if [ -f "$(dirname "$0")/load-secrets.sh" ]; then . "$(dirname "$0")/load-secrets.sh"; fi
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 root="${BACKUP_ROOT:-/backups}"
 mkdir -p "$root/$timestamp"

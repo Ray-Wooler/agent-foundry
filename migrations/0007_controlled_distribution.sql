@@ -1,5 +1,12 @@
 BEGIN;
 
+-- 0006 installs immutable-record triggers before these legacy columns exist.
+-- Temporarily remove only those triggers for the one-time NULL backfill, then
+-- recreate them unchanged below so historical rows remain immutable afterward.
+DROP TRIGGER IF EXISTS trg_release_package_records_immutable ON release_package_records;
+DROP TRIGGER IF EXISTS trg_publication_records_immutable ON publication_records;
+DROP TRIGGER IF EXISTS trg_frankai_registration_records_immutable ON frankai_registration_records;
+
 ALTER TABLE release_package_records
   ADD COLUMN idempotency_key text,
   ADD COLUMN package_manifest jsonb,
@@ -130,5 +137,17 @@ END $$;
 CREATE TRIGGER trg_frankai_registration_valid
 BEFORE INSERT ON frankai_registration_records
 FOR EACH ROW EXECUTE FUNCTION validate_frankai_registration_insert();
+
+CREATE TRIGGER trg_release_package_records_immutable
+BEFORE UPDATE OR DELETE ON release_package_records
+FOR EACH ROW EXECUTE FUNCTION prevent_certification_governance_mutation();
+
+CREATE TRIGGER trg_publication_records_immutable
+BEFORE UPDATE OR DELETE ON publication_records
+FOR EACH ROW EXECUTE FUNCTION prevent_certification_governance_mutation();
+
+CREATE TRIGGER trg_frankai_registration_records_immutable
+BEFORE UPDATE OR DELETE ON frankai_registration_records
+FOR EACH ROW EXECUTE FUNCTION prevent_certification_governance_mutation();
 
 COMMIT;
