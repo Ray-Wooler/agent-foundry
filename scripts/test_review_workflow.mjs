@@ -119,6 +119,8 @@ for (let i = 0; i < 100; i++) {
 }
 assert(child?.status === "REQUIRES_REVIEW", "revision child must reach REQUIRES_REVIEW");
 assert(child.agentVersionStatus === "DRAFT", "revision child must start DRAFT");
+assert(child.registryId === parent.registryId, "revision child must retain the same Agent registry identity");
+assert(child.version !== parent.version, "revision child must receive a new AgentVersion");
 assert(child.candidate?.extensions?.promptforge?.revision_request_sha256, "revision guidance hash must be preserved");
 
 const parentAfter = await call("/v1/transformations/" + parent.id, {}, token);
