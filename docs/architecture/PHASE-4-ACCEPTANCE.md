@@ -19,7 +19,7 @@ Phase 4 is not accepted until Evaluation Orchestration passes on the exact PR he
 
 ## Phase 4 Decision
 
-**EVALUATION ORCHESTRATION & CERTIFICATION READINESS PASS / VERIFIED / AWAITING ENFORCEMENT**
+**EVALUATION ORCHESTRATION & CERTIFICATION READINESS PASS / VERIFIED / ENFORCED**
 
 Evidence from Evaluation Orchestration run `37112341023`:
 
@@ -43,3 +43,5 @@ Live acceptance artifacts:
 - failing evaluation plan: `be96644a-a59d-49ee-b5b3-d3380ddf2b7b`
 - failing aggregate: `FAIL`
 - failing certification status: `NOT_ELIGIBLE`
+
+Enforcement: Protect Main ruleset 24352789 requires Evaluation Orchestration in addition to the ten previously enforced checks.
