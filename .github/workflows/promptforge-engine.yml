@@ -1,0 +1,31 @@
+name: PromptForge Engine
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  promptforge-engine:
+    name: PromptForge Engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.12.4 --activate
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck workspace
+        run: pnpm typecheck
+      - name: Build workspace
+        run: pnpm build
+      - name: Verify PromptForge engine and OpenAI adapter
+        run: node scripts/test_promptforge_engine.mjs
