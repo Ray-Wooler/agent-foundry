@@ -2,17 +2,6 @@ name: FrankAI Integration
 
 on:
   pull_request:
-    paths:
-      - "schemas/integration/frankai/**"
-      - "scripts/build_frankai_publication.py"
-      - "scripts/verify_frankai_publication.py"
-      - "scripts/package_release.py"
-      - "scripts/compile_agent.py"
-      - "tests/fixtures/release/**"
-      - "agents/**/agent.aps.json"
-      - "agents/**/evaluations/**"
-      - "docs/architecture/ADR/0010-frankai-integration.md"
-      - ".github/workflows/frankai-integration.yml"
   push:
     branches: [main]
     paths:
