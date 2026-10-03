@@ -102,22 +102,51 @@ async function processOne(item: Claimed) {
     });
 
     await transaction(async (client) => {
-      const seq = await client.query<{ value: string }>("SELECT nextval('agent_registry_seq')::text AS value");
-      const suffix = seq.rows[0]!.value;
-      const registryId = `AGR-${suffix}`;
-      const slug = `${slugify(item.requested_name)}-${suffix}`;
+      const parentAgentVersionId = typeof item.configuration.parentAgentVersionId === "string"
+        ? item.configuration.parentAgentVersionId
+        : null;
 
-      const agent = await client.query<{ id: string }>(
-        `INSERT INTO agents(registry_id,slug,name,class,category)
-         VALUES ($1,$2,$3,$4,'candidate') RETURNING id`,
-        [registryId, slug, item.requested_name, item.requested_class],
-      );
-      const agentId = agent.rows[0]!.id;
+      let agentId: string;
+      let registryId: string;
+      let versionLabel: string;
+
+      if (parentAgentVersionId) {
+        const parent = await client.query<{ agent_id: string; registry_id: string }>(
+          `SELECT av.agent_id,a.registry_id
+           FROM agent_versions av
+           JOIN agents a ON a.id=av.agent_id
+           WHERE av.id=$1`,
+          [parentAgentVersionId],
+        );
+        const parentRow = parent.rows[0];
+        if (!parentRow) throw new Error("revision parent AgentVersion not found");
+        agentId = parentRow.agent_id;
+        registryId = parentRow.registry_id;
+
+        const count = await client.query<{ count: string }>(
+          "SELECT count(*)::text AS count FROM agent_versions WHERE agent_id=$1",
+          [agentId],
+        );
+        versionLabel = `0.1.${count.rows[0]!.count}`;
+      } else {
+        const seq = await client.query<{ value: string }>("SELECT nextval('agent_registry_seq')::text AS value");
+        const suffix = seq.rows[0]!.value;
+        registryId = `AGR-${suffix}`;
+        const slug = `${slugify(item.requested_name)}-${suffix}`;
+
+        const agent = await client.query<{ id: string }>(
+          `INSERT INTO agents(registry_id,slug,name,class,category)
+           VALUES ($1,$2,$3,$4,'candidate') RETURNING id`,
+          [registryId, slug, item.requested_name, item.requested_class],
+        );
+        agentId = agent.rows[0]!.id;
+        versionLabel = "0.1.0";
+      }
 
       const version = await client.query<{ id: string }>(
         `INSERT INTO agent_versions(agent_id,version,status,aps_version)
-         VALUES ($1,'0.1.0','DRAFT','1.5-alpha') RETURNING id`,
-        [agentId],
+         VALUES ($1,$2,'DRAFT','1.5-alpha') RETURNING id`,
+        [agentId, versionLabel],
       );
       const versionId = version.rows[0]!.id;
 
