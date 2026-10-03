@@ -231,8 +231,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       id: string; status: string; requested_name: string; requested_class: string;
       record: unknown; candidate_sha256: string | null; failure_reason: string | null;
       document: unknown | null; registry_id: string | null; version: string | null;
+      provider: string | null; model: string | null; validation_status: string | null;
     }>(
       `SELECT t.id,t.status,t.requested_name,t.requested_class,t.record,t.candidate_sha256,t.failure_reason,
+              t.provider,t.model,t.validation_status,
               aps.document,a.registry_id,av.version
        FROM promptforge_transformations t
        JOIN projects p ON p.id=t.project_id
@@ -245,6 +247,22 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     );
     const item = found.rows[0];
     if (!item) return json(res, 404, { error: "not_found" });
+    const review = await query<{
+      candidate_diff: unknown; explanation: unknown; validation: unknown;
+    }>(
+      `SELECT candidate_diff,explanation,validation
+       FROM promptforge_review_packages WHERE transformation_id=$1`,
+      [transformationId],
+    );
+    const stages = await query<{
+      stage: string; status: string; output: unknown; sha256: string;
+    }>(
+      `SELECT stage,status,output,sha256
+       FROM promptforge_stage_results
+       WHERE transformation_id=$1
+       ORDER BY created_at,stage`,
+      [transformationId],
+    );
     return json(res, 200, {
       id: item.id,
       status: item.status,
@@ -254,8 +272,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       failureReason: item.failure_reason,
       registryId: item.registry_id,
       version: item.version,
+      provider: item.provider,
+      model: item.model,
+      validationStatus: item.validation_status,
       candidate: item.document,
       transformationRecord: item.record,
+      reviewPackage: review.rows[0] ? {
+        candidateDiff: review.rows[0].candidate_diff,
+        explanation: review.rows[0].explanation,
+        validation: review.rows[0].validation,
+      } : null,
+      stages: stages.rows,
     });
   }
 
