@@ -259,6 +259,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
     try {
       const result = await transaction(async (client) => {
+        const existingReview = await client.query(
+          "SELECT 1 FROM semantic_reviews WHERE transformation_id=$1",
+          [transformationId],
+        );
+        if (existingReview.rowCount) throw new Error("review_already_recorded");
+
         const candidate = await client.query<{
           agent_version_id: string; candidate_sha256: string; status: string;
         }>(
@@ -333,7 +339,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return json(res, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("duplicate key")) return json(res, 409, { error: "review_already_recorded" });
+      if (message === "review_already_recorded" || message.includes("duplicate key")) {
+        return json(res, 409, { error: "review_already_recorded" });
+      }
       if (message === "candidate_not_ready" || message === "candidate_not_reviewable") {
         return json(res, 409, { error: message });
       }
