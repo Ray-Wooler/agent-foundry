@@ -1,8 +1,10 @@
 import { readdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { pool } from "./index.js";
 
-const migrationsDir = process.env.MIGRATIONS_DIR ?? path.resolve(process.cwd(), "migrations");
+const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const migrationsDir = process.env.MIGRATIONS_DIR ?? path.join(repositoryRoot, "migrations");
 
 await pool.query(`
   CREATE TABLE IF NOT EXISTS app_schema_migrations (
