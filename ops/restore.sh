@@ -9,6 +9,6 @@ dump="$(find "$restore_root" -name foundry.dump -type f | head -n 1)"
 test -n "$dump"
 pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" "$dump"
 objects="$(find "$restore_root" -type d -name object-storage | head -n 1 || true)"
-if [ -n "$objects" ] && command -v mc >/dev/null 2>&1; then
-  mc mirror --overwrite "$objects" foundry/agent-foundry
+if [ -n "$objects" ] && [ -n "${OBJECT_STORAGE_BUCKET:-}" ]; then
+  node scripts/import_object_storage.mjs "$objects"
 fi
