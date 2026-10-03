@@ -7,6 +7,7 @@ export type CandidateRequest = {
   agentClass: "orchestrator" | "specialist" | "builder" | "analyst" | "advisor" | "monitor" | "communicator" | "reviewer";
   sourcePrompt: string;
   rightsStatus: RightsStatus;
+  revisionRequest?: string;
 };
 
 function canonicalize(value: unknown): unknown {
