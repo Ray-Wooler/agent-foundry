@@ -124,7 +124,17 @@ jobs:
       - name: Verify backup and restore
         shell: bash
         run: |
-          archive=$(BACKUP_ROOT=/tmp/foundry-backups sh ops/backup.sh)
+          printf '%s' "$DATABASE_URL" >/tmp/foundry-db-url
+          printf '%s' "$OBJECT_STORAGE_ACCESS_KEY" >/tmp/foundry-s3-access
+          printf '%s' "$OBJECT_STORAGE_SECRET_KEY" >/tmp/foundry-s3-secret
+          archive=$(
+            env -u DATABASE_URL -u OBJECT_STORAGE_ACCESS_KEY -u OBJECT_STORAGE_SECRET_KEY \
+              DATABASE_URL_FILE=/tmp/foundry-db-url \
+              OBJECT_STORAGE_ACCESS_KEY_FILE=/tmp/foundry-s3-access \
+              OBJECT_STORAGE_SECRET_KEY_FILE=/tmp/foundry-s3-secret \
+              BACKUP_ROOT=/tmp/foundry-backups \
+              sh ops/backup.sh
+          )
           sh ops/backup-verify.sh "$archive"
           createdb -h localhost -U foundry foundry_restore
           DATABASE_URL=postgres://foundry:foundry@localhost:5432/foundry_restore sh ops/restore.sh "$archive"
