@@ -20,7 +20,7 @@ Phase 5 is not accepted until Certification Authority passes on the exact PR hea
 
 ## Phase 5 Decision
 
-**CERTIFICATION AUTHORITY & RELEASE APPROVAL PASS / VERIFIED / AWAITING ENFORCEMENT**
+**CERTIFICATION AUTHORITY & RELEASE APPROVAL PASS / VERIFIED / ENFORCED**
 
 Evidence from Certification Authority run `37119257925`:
 
@@ -42,3 +42,5 @@ Live acceptance artifacts:
 - packaging status after approval: `NOT_PACKAGED`
 - publication status after approval: `NOT_PUBLISHED`
 - FrankAI registration status after approval: `NOT_REGISTERED`
+
+Enforcement: Protect Main ruleset 24352789 requires Certification Authority in addition to the eleven previously enforced checks.
