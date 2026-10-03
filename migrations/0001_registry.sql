@@ -214,8 +214,12 @@ BEGIN
   RETURN NEW;
 END $$;
 
-CREATE TRIGGER trg_release_certified
-BEFORE INSERT OR UPDATE OF agent_version_id ON releases
+CREATE TRIGGER trg_release_certified_insert
+BEFORE INSERT ON releases
+FOR EACH ROW EXECUTE FUNCTION require_certified_release();
+
+CREATE TRIGGER trg_release_certified_update
+BEFORE UPDATE OF agent_version_id ON releases
 FOR EACH ROW EXECUTE FUNCTION require_certified_release();
 
 CREATE OR REPLACE FUNCTION prevent_release_mutation()
