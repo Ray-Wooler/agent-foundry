@@ -62,6 +62,10 @@ pre{white-space:pre-wrap;word-break:break-word;background:#101317;color:#e7edf4;
 <h2>Transformation</h2><span id="statusBadge" class="badge">QUEUED</span>
 </div>
 <div id="statusMeta" class="sub"></div>
+<h3>Reviewer explanation</h3><pre id="explanation">Waiting for worker…</pre>
+<h3>Governance validation</h3><pre id="validation">Waiting for worker…</pre>
+<h3>Candidate diff</h3><pre id="diff">Waiting for worker…</pre>
+<h3>PromptForge stages</h3><pre id="stages">Waiting for worker…</pre>
 <h3>Candidate APS</h3><pre id="candidate">Waiting for worker…</pre>
 <h3>Transformation record</h3><pre id="record">Waiting for worker…</pre>
 </section>
@@ -103,7 +107,17 @@ async function poll(id){
   for(let i=0;i<120;i++){
     const data=await api("/v1/transformations/"+id);
     q("statusBadge").textContent=data.status;
-    q("statusMeta").textContent=[data.registryId,data.version,data.candidateSha256].filter(Boolean).join(" · ");
+    q("statusMeta").textContent=[
+      data.registryId,
+      data.version,
+      data.provider && data.model ? (data.provider + " / " + data.model) : null,
+      data.validationStatus,
+      data.candidateSha256
+    ].filter(Boolean).join(" · ");
+    if(data.reviewPackage?.explanation) q("explanation").textContent=JSON.stringify(data.reviewPackage.explanation,null,2);
+    if(data.reviewPackage?.validation) q("validation").textContent=JSON.stringify(data.reviewPackage.validation,null,2);
+    if(data.reviewPackage?.candidateDiff) q("diff").textContent=JSON.stringify(data.reviewPackage.candidateDiff,null,2);
+    if(data.stages) q("stages").textContent=JSON.stringify(data.stages,null,2);
     if(data.candidate) q("candidate").textContent=JSON.stringify(data.candidate,null,2);
     if(data.transformationRecord) q("record").textContent=JSON.stringify(data.transformationRecord,null,2);
     if(!["QUEUED","PROCESSING"].includes(data.status)) return;
