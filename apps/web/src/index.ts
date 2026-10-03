@@ -110,6 +110,35 @@ pre{white-space:pre-wrap;word-break:break-word;background:#101317;color:#e7edf4;
     </div>
     <p><button id="certReadinessButton">Record certification-readiness decision</button></p>
   </div>
+
+  <div id="certificationControls" class="hidden">
+    <h3>Certification authority</h3>
+    <div class="grid">
+      <div><label>Certification decision</label><select id="certificationDecision">
+        <option value="CERTIFY">Certify</option>
+        <option value="DENY">Deny</option>
+      </select></div>
+      <div><label>Certification rationale</label><input id="certificationRationale" placeholder="Why should this version be certified or denied?" /></div>
+    </div>
+    <p><label>Certification evidence</label><textarea id="certificationEvidence" placeholder="One evidence item per line"></textarea></p>
+    <p><button id="certificationButton">Record certification decision</button></p>
+  </div>
+
+  <div id="releaseApprovalControls" class="hidden">
+    <h3>Release approval</h3>
+    <div class="grid">
+      <div><label>Release decision</label><select id="releaseApprovalDecision">
+        <option value="APPROVE">Approve packaging</option>
+        <option value="DENY">Deny release</option>
+      </select></div>
+      <div><label>Intended distribution</label><input id="intendedDistribution" placeholder="e.g. FrankAI internal registry" /></div>
+    </div>
+    <p><label>Release rationale</label><input id="releaseApprovalRationale" placeholder="Why may this certified version proceed to packaging?" /></p>
+    <p><button id="releaseApprovalButton">Record release approval</button></p>
+  </div>
+
+  <h3>Certification / release authority state</h3>
+  <pre id="authorityState">No certification authority decision.</pre>
 </div>
 </section>
 </div>
@@ -119,6 +148,7 @@ let token=sessionStorage.getItem("foundry_token");
 let currentTransformationId=null;
 let currentEvaluationPlanId=null;
 let currentHumanExecutionId=null;
+let currentAgentVersionId=null;
 const q=(id)=>document.getElementById(id);
 async function api(path,options={}){
   const headers={"content-type":"application/json",...(options.headers||{})};
@@ -196,6 +226,7 @@ async function pollEvaluationPlan(id){
   for(let i=0;i<120;i++){
     const data=await api("/v1/evaluation-plans/"+id);
     q("evaluationState").textContent=JSON.stringify(data,null,2);
+    currentAgentVersionId=data.plan?.agent_version_id||currentAgentVersionId;
     const awaiting=(data.executions||[]).find(x=>x.status==="AWAITING_HUMAN");
     if(awaiting){
       currentHumanExecutionId=awaiting.id;
@@ -208,6 +239,11 @@ async function pollEvaluationPlan(id){
       q("certReadinessControls").classList.remove("hidden");
     } else {
       q("certReadinessControls").classList.add("hidden");
+    }
+    if(data.certificationReadinessDecision?.decision==="ELIGIBLE" && data.plan?.agent_version_status==="EVALUATED"){
+      q("certificationControls").classList.remove("hidden");
+    } else {
+      q("certificationControls").classList.add("hidden");
     }
     if(!["READY","RUNNING","AWAITING_HUMAN"].includes(data.plan?.status)) return data;
     if(data.plan?.status==="AWAITING_HUMAN") return data;
@@ -250,6 +286,56 @@ q("certReadinessButton").onclick=async()=>{
       })
     });
     await pollEvaluationPlan(currentEvaluationPlanId);
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+
+
+async function refreshAuthorityState(){
+  if(!currentAgentVersionId)return;
+  try{
+    const data=await api("/v1/agent-versions/"+currentAgentVersionId+"/authority-state");
+    q("authorityState").textContent=JSON.stringify(data,null,2);
+    if(data.authorityState?.agent_version_status==="CERTIFIED" && !data.authorityState?.release_approval_id){
+      q("releaseApprovalControls").classList.remove("hidden");
+    } else {
+      q("releaseApprovalControls").classList.add("hidden");
+    }
+    if(data.authorityState?.certification_record_id){
+      q("certificationControls").classList.add("hidden");
+    }
+  }catch(e){q("evaluationError").textContent=e.message;}
+}
+q("certificationButton").onclick=async()=>{
+  if(!currentEvaluationPlanId)return;
+  q("evaluationError").textContent="";
+  try{
+    const evidence=q("certificationEvidence").value.split("\n").map(x=>x.trim()).filter(Boolean);
+    const data=await api("/v1/evaluation-plans/"+currentEvaluationPlanId+"/certification",{
+      method:"POST",
+      body:JSON.stringify({
+        decision:q("certificationDecision").value,
+        rationale:q("certificationRationale").value,
+        evidence
+      })
+    });
+    currentAgentVersionId=data.agentVersionId;
+    await refreshAuthorityState();
+    await pollEvaluationPlan(currentEvaluationPlanId);
+  }catch(e){q("evaluationError").textContent=e.message;}
+};
+q("releaseApprovalButton").onclick=async()=>{
+  if(!currentAgentVersionId)return;
+  q("evaluationError").textContent="";
+  try{
+    await api("/v1/agent-versions/"+currentAgentVersionId+"/release-approval",{
+      method:"POST",
+      body:JSON.stringify({
+        decision:q("releaseApprovalDecision").value,
+        rationale:q("releaseApprovalRationale").value,
+        intendedDistribution:q("intendedDistribution").value
+      })
+    });
+    await refreshAuthorityState();
   }catch(e){q("evaluationError").textContent=e.message;}
 };
 
