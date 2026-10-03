@@ -1,0 +1,72 @@
+name: Production Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Accepted commit SHA or tag to deploy
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-foundry-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy foundry.frankai.online
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Configure production SSH
+        shell: bash
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf "%s\n" "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf "%s\n" "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Transfer accepted release
+        shell: bash
+        env:
+          HOST: ${{ secrets.PROD_SSH_HOST }}
+          USER: ${{ secrets.PROD_SSH_USER }}
+          PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          release="/opt/agent-foundry/releases/${GITHUB_SHA}"
+          ssh -p "${PORT:-22}" "$USER@$HOST" "mkdir -p $release"
+          tar --exclude=.git -czf - . | ssh -p "${PORT:-22}" "$USER@$HOST" "tar -xzf - -C $release"
+      - name: Deploy accepted release
+        shell: bash
+        env:
+          HOST: ${{ secrets.PROD_SSH_HOST }}
+          USER: ${{ secrets.PROD_SSH_USER }}
+          PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          ssh -p "${PORT:-22}" "$USER@$HOST" "
+            set -eu;
+            release=/opt/agent-foundry/releases/${GITHUB_SHA};
+            test -f /etc/agent-foundry/production.env;
+            set -a; . /etc/agent-foundry/production.env; set +a;
+            export APP_VERSION=${GITHUB_SHA};
+            cd $release;
+            sh ops/deploy.sh;
+            ln -sfn $release /opt/agent-foundry/current
+          "
+      - name: Production acceptance smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --retry 10 --retry-delay 3 https://foundry.frankai.online/api/ready
+          curl --fail --show-error --silent --retry 10 --retry-delay 3 https://foundry.frankai.online/ >/dev/null
