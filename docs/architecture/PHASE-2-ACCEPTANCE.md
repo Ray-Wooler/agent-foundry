@@ -15,8 +15,10 @@ Phase 2 is not accepted until P2-G6 and P2-G7 pass on the exact PR head and Prom
 
 ## Phase 2 Decision
 
-**REAL PROMPTFORGE ENGINE PASS / VERIFIED / AWAITING ENFORCEMENT**
+**REAL PROMPTFORGE ENGINE PASS / VERIFIED / ENFORCED**
 
 Evidence: migration `0003_real_promptforge.sql` applied; five model-analysis stages executed; deterministic CI provider persisted stage/review evidence; OpenAI Responses adapter passed protocol/parsing acceptance; full web/API/worker slice produced transformation `f919b246-3a58-4782-9c06-f1ec71e2adcc`, registry candidate `AGR-1000`, and candidate digest `740d3054428a0eac8db1469f947af457104dfffe9121079654b22915bde29ef8` while execution authority, delegation authority, and runtime tools remained ungranted.
 
 Additional audit proof: completed stage evidence is emitted append-only as each stage finishes; a later-stage failure does not erase successful earlier-stage evidence.
+
+Enforcement: Protect Main ruleset 24352789 requires PromptForge Engine in addition to the eight previously enforced checks.
