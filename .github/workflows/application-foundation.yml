@@ -38,6 +38,7 @@ jobs:
       BOOTSTRAP_WORKSPACE_NAME: Test Workspace
       SESSION_TTL_HOURS: "1"
       WORKER_POLL_MS: "100"
+      PROMPTFORGE_PROVIDER: deterministic
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
