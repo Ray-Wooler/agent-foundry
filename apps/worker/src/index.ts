@@ -65,35 +65,8 @@ async function processOne(item: Claimed) {
       agentClass: item.requested_class,
       sourcePrompt: item.content_text,
       rightsStatus: item.rights_status,
-    });
-
-    await transaction(async (client) => {
-      const seq = await client.query<{ value: string }>("SELECT nextval('agent_registry_seq')::text AS value");
-      const suffix = seq.rows[0]!.value;
-      const registryId = `AGR-${suffix}`;
-      const slug = `${slugify(item.requested_name)}-${suffix}`;
-
-      const agent = await client.query<{ id: string }>(
-        `INSERT INTO agents(registry_id,slug,name,class,category)
-         VALUES ($1,$2,$3,$4,'candidate') RETURNING id`,
-        [registryId, slug, item.requested_name, item.requested_class],
-      );
-      const agentId = agent.rows[0]!.id;
-
-      const version = await client.query<{ id: string }>(
-        `INSERT INTO agent_versions(agent_id,version,status,aps_version)
-         VALUES ($1,'0.1.0','DRAFT','1.5-alpha') RETURNING id`,
-        [agentId],
-      );
-      const versionId = version.rows[0]!.id;
-
-      await client.query(
-        `INSERT INTO aps_specifications(agent_version_id,document,sha256)
-         VALUES ($1,$2::jsonb,$3)`,
-        [versionId, JSON.stringify(built.apsDocument), built.candidateSha256],
-      );
-
-      for (const stage of built.stages) {
+    }, async (stage) => {
+      await transaction(async (client) => {
         await client.query(
           `INSERT INTO promptforge_model_calls(
              transformation_id,stage,provider,model,request_id,prompt_sha256,response_sha256,output
@@ -121,7 +94,34 @@ async function processOne(item: Claimed) {
             sha256Text(canonicalJson(stage.output)),
           ],
         );
-      }
+      });
+    });
+
+    await transaction(async (client) => {
+      const seq = await client.query<{ value: string }>("SELECT nextval('agent_registry_seq')::text AS value");
+      const suffix = seq.rows[0]!.value;
+      const registryId = `AGR-${suffix}`;
+      const slug = `${slugify(item.requested_name)}-${suffix}`;
+
+      const agent = await client.query<{ id: string }>(
+        `INSERT INTO agents(registry_id,slug,name,class,category)
+         VALUES ($1,$2,$3,$4,'candidate') RETURNING id`,
+        [registryId, slug, item.requested_name, item.requested_class],
+      );
+      const agentId = agent.rows[0]!.id;
+
+      const version = await client.query<{ id: string }>(
+        `INSERT INTO agent_versions(agent_id,version,status,aps_version)
+         VALUES ($1,'0.1.0','DRAFT','1.5-alpha') RETURNING id`,
+        [agentId],
+      );
+      const versionId = version.rows[0]!.id;
+
+      await client.query(
+        `INSERT INTO aps_specifications(agent_version_id,document,sha256)
+         VALUES ($1,$2::jsonb,$3)`,
+        [versionId, JSON.stringify(built.apsDocument), built.candidateSha256],
+      );
 
       await client.query(
         `INSERT INTO promptforge_review_packages(
