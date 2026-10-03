@@ -26,6 +26,37 @@ assert(result.reviewPackage.validation.status === "PASS", "candidate validation 
 assert(result.reviewPackage.candidateDiff.length > 0, "review diff must be generated");
 assert(result.transformationRecord.status === "REQUIRES_REVIEW", "candidate must remain review-gated");
 
+
+const retainedStages = [];
+const baseProvider = new DeterministicPromptForgeProvider();
+const failingProvider = {
+  async generate(stage, sourcePrompt, context) {
+    if (stage === "GOVERNANCE_CONSTRUCTION") throw new Error("synthetic governance-stage failure");
+    return baseProvider.generate(stage, sourcePrompt, context);
+  },
+};
+const failingEngine = new PromptForgeEngine(failingProvider);
+let failedAsExpected = false;
+try {
+  await failingEngine.transform({
+    name: "Failure Evidence Agent",
+    agentClass: "analyst",
+    rightsStatus: "UNVERIFIED",
+    sourcePrompt: "Research and summarize supplied information.",
+  }, async (stage) => {
+    retainedStages.push(stage.stage);
+  });
+} catch (error) {
+  failedAsExpected = String(error).includes("synthetic governance-stage failure");
+}
+assert(failedAsExpected, "synthetic later-stage failure must propagate");
+assert(
+  JSON.stringify(retainedStages) === JSON.stringify([
+    "INTENT_ANALYSIS","DEFECT_ANALYSIS","CAPABILITY_EXTRACTION"
+  ]),
+  "completed stage evidence must be emitted before a later-stage failure",
+);
+
 const mock = createServer(async (req, res) => {
   if (req.method !== "POST" || req.url !== "/responses") {
     res.writeHead(404); res.end(); return;
@@ -71,4 +102,5 @@ console.log(JSON.stringify({
   candidateSha256: result.candidateSha256,
   validation: result.reviewPackage.validation.status,
   openAIAdapter: "PASS",
+  partialEvidenceRetention: retainedStages,
 }, null, 2));
