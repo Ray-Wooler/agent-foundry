@@ -22,7 +22,7 @@ const token=login.token;
 const projectId=login.workspaces?.[0]?.projects?.[0]?.id;
 assert(token&&projectId,"distribution test requires project");
 
-async function createReleaseApprovedCandidate(){
+async function createCertifiedCandidate(){
   const intake=await call("/v1/intake",{method:"POST",body:JSON.stringify({
     projectId,
     name:"Phase 6 Distribution Agent",
@@ -67,21 +67,26 @@ async function createReleaseApprovedCandidate(){
     evidence:["Semantic approval","Evaluation aggregate PASS","Readiness ELIGIBLE"]
   })},token);
 
-  const approval=await call("/v1/agent-versions/"+cert.agentVersionId+"/release-approval",{method:"POST",body:JSON.stringify({
-    decision:"APPROVE",
-    rationale:"Certified version may proceed to controlled packaging.",
-    intendedDistribution:"FrankAI internal registry"
-  })},token);
-
-  return {planId:plan.planId,agentVersionId:cert.agentVersionId,releaseApprovalId:approval.releaseApprovalId};
+  return {planId:plan.planId,agentVersionId:cert.agentVersionId,certificationRecordId:cert.certificationRecordId};
 }
 
-const subject=await createReleaseApprovedCandidate();
+const subject=await createCertifiedCandidate();
 
 const pre=await call("/v1/agent-versions/"+subject.agentVersionId+"/authority-state",{},token);
 assert(pre.authorityState.packaging_status==="NOT_PACKAGED","must begin unpackaged");
 assert(pre.authorityState.publication_status==="NOT_PUBLISHED","must begin unpublished");
 assert(pre.authorityState.frankai_registration_status==="NOT_REGISTERED","must begin unregistered");
+
+await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
+  releaseVersion:"1.0.0",idempotencyKey:"pkg-before-approval-0000"
+})},token,409);
+
+const approval=await call("/v1/agent-versions/"+subject.agentVersionId+"/release-approval",{method:"POST",body:JSON.stringify({
+  decision:"APPROVE",
+  rationale:"Certified version may proceed to controlled packaging.",
+  intendedDistribution:"FrankAI internal registry"
+})},token);
+assert(approval.releaseApprovalStatus==="APPROVED","release approval must precede packaging");
 
 const packageKey="pkg-phase6-idem-0001";
 const package1=await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
