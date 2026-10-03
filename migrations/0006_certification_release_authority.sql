@@ -213,6 +213,11 @@ BEGIN
     RAISE EXCEPTION 'VALIDATED must transition through EVALUATED';
   END IF;
 
+  IF OLD.status='EVALUATED'
+     AND NEW.status NOT IN ('CERTIFIED','REJECTED','SUPERSEDED','RETIRED','QUARANTINED') THEN
+    RAISE EXCEPTION 'EVALUATED may only enter certification or terminal governance states';
+  END IF;
+
   IF OLD.status='EVALUATED' AND NEW.status='CERTIFIED' THEN
     SELECT EXISTS (
       SELECT 1 FROM certification_records c
@@ -225,6 +230,11 @@ BEGIN
       RAISE EXCEPTION 'EVALUATED to CERTIFIED requires immutable CERTIFY record';
     END IF;
     RETURN NEW;
+  END IF;
+
+  IF OLD.status='CERTIFIED'
+     AND NEW.status NOT IN ('SUPERSEDED','RETIRED','QUARANTINED') THEN
+    RAISE EXCEPTION 'CERTIFIED AgentVersion state is stable; packaging/publication use separate records';
   END IF;
 
   IF NEW.status='RELEASED' AND OLD.status<>'RELEASED' THEN
