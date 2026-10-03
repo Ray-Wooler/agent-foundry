@@ -1,0 +1,96 @@
+name: Controlled Distribution
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  controlled-distribution:
+    name: Controlled Distribution
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: foundry
+      DATABASE_URL: postgres://foundry:foundry@localhost:5432/foundry
+      API_PORT: "3001"
+      WEB_PORT: "3000"
+      API_PUBLIC_URL: http://localhost:3001
+      WEB_PUBLIC_URL: http://localhost:3000
+      WEB_ORIGIN: http://localhost:3000
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: phase1-test-password
+      BOOTSTRAP_WORKSPACE_NAME: Distribution Workspace
+      SESSION_TTL_HOURS: "1"
+      WORKER_POLL_MS: "100"
+      PROMPTFORGE_PROVIDER: deterministic
+      MOCK_FRANKAI_PORT: "4010"
+      MOCK_FRANKAI_URL: http://127.0.0.1:4010
+      FRANKAI_REGISTRY_URL: http://127.0.0.1:4010/v1/agent-releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.12.4 --activate
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck workspace
+        run: pnpm typecheck
+      - name: Build workspace
+        run: pnpm build
+      - name: Apply application migrations
+        run: pnpm db:migrate
+      - name: Execute controlled distribution workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/mock_frankai_registry.mjs > /tmp/frankai-mock.log 2>&1 &
+          MOCK_PID=$!
+          pnpm --filter @agent-foundry/api start > /tmp/foundry-api.log 2>&1 &
+          API_PID=$!
+          pnpm --filter @agent-foundry/worker start > /tmp/foundry-worker.log 2>&1 &
+          WORKER_PID=$!
+          pnpm --filter @agent-foundry/web start > /tmp/foundry-web.log 2>&1 &
+          WEB_PID=$!
+          cleanup() {
+            kill "$MOCK_PID" "$API_PID" "$WORKER_PID" "$WEB_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:3001/health >/dev/null               && curl -fsS http://localhost:3000/ >/dev/null               && curl -fsS http://127.0.0.1:4010/_state >/dev/null; then
+              break
+            fi
+            if [ "$i" -eq 40 ]; then
+              echo "--- API log ---"; cat /tmp/foundry-api.log || true
+              echo "--- Worker log ---"; cat /tmp/foundry-worker.log || true
+              echo "--- Web log ---"; cat /tmp/foundry-web.log || true
+              echo "--- FrankAI mock log ---"; cat /tmp/frankai-mock.log || true
+              exit 1
+            fi
+            sleep 0.5
+          done
+
+          node scripts/test_controlled_distribution.mjs
+      - name: Verify distribution audit evidence
+        run: psql -h localhost -U foundry -d foundry -v ON_ERROR_STOP=1 -f tests/sql/distribution_audit_assertions.sql

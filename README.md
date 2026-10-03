@@ -219,3 +219,42 @@ Certification records preserve the exact APS digest, PASS aggregate, evidence bu
 Release approval snapshots distribution rights and intended distribution. Approval only authorizes the next packaging stage; it does not package, publish, or register automatically.
 
 Packaging, publication and FrankAI registration use distinct records. The AgentVersion remains `CERTIFIED` throughout later release stages.
+
+
+## Phase 6 Controlled Distribution
+
+An approved certified version now moves through three explicit distribution actions:
+
+```text
+CERTIFIED + release APPROVED
+            |
+            v
+        PACKAGE
+            |
+            +--> canonical JSON bundle
+            +--> generic/OpenAI runtime artifacts
+            +--> package SHA-256
+            |
+            v
+        PACKAGED
+            |
+            v
+        PUBLISH
+            |
+            v
+        PUBLISHED
+            |
+            v
+   REGISTER WITH FRANKAI
+            |
+            v
+        REGISTERED
+```
+
+Each action accepts an idempotency key. Safe retry with the same key returns the original record. A conflicting retry with a different key is rejected.
+
+The package content is persisted immutably and contains the certified APS, deterministic runtime artifacts, evaluation evidence references, certification evidence and release approval snapshot.
+
+FrankAI registration is a real outbound HTTP boundary configured with `FRANKAI_REGISTRY_URL`. The API sends an `Idempotency-Key` header and persists both request and response payloads plus the stable registration reference.
+
+Packaging does not publish. Publication does not register. Registration does not rewrite any earlier evidence.

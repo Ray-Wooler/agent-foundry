@@ -4,6 +4,11 @@ import { digestSessionToken, issueSessionToken, normalizeEmail, verifyPassword }
 import { query, transaction } from "@agent-foundry/db";
 import { sha256Text, type RightsStatus } from "@agent-foundry/domain";
 import {
+  buildReleaseBundle,
+  buildPublicationPayload,
+  buildFrankAIRegistrationPayload,
+} from "@agent-foundry/release";
+import {
   applyHumanReview,
   aggregateRequiredSuites,
   type AssertionResult,
@@ -258,6 +263,44 @@ async function authorityRoleForAgentVersion(
      ORDER BY t.created_at DESC
      LIMIT 1`,
     [agentVersionId,userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
+
+async function authorityRoleForReleasePackage(
+  userId: string,
+  packageRecordId: string,
+): Promise<"OWNER" | "ADMIN" | null> {
+  const result = await query<{ role: "OWNER" | "ADMIN" }>(
+    `SELECT m.role
+     FROM release_package_records rp
+     JOIN promptforge_transformations t ON t.agent_version_id=rp.agent_version_id
+     JOIN projects p ON p.id=t.project_id
+     JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     WHERE rp.id=$1 AND m.user_id=$2 AND m.role IN ('OWNER','ADMIN')
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [packageRecordId,userId],
+  );
+  return result.rows[0]?.role ?? null;
+}
+
+async function authorityRoleForPublication(
+  userId: string,
+  publicationId: string,
+): Promise<"OWNER" | "ADMIN" | null> {
+  const result = await query<{ role: "OWNER" | "ADMIN" }>(
+    `SELECT m.role
+     FROM publication_records pub
+     JOIN release_package_records rp ON rp.id=pub.release_package_record_id
+     JOIN promptforge_transformations t ON t.agent_version_id=rp.agent_version_id
+     JOIN projects p ON p.id=t.project_id
+     JOIN workspace_memberships m ON m.workspace_id=p.workspace_id
+     WHERE pub.id=$1 AND m.user_id=$2 AND m.role IN ('OWNER','ADMIN')
+     ORDER BY t.created_at DESC
+     LIMIT 1`,
+    [publicationId,userId],
   );
   return result.rows[0]?.role ?? null;
 }
@@ -1131,6 +1174,404 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
   }
 
+
+  const packageMatch=/^\/v1\/agent-versions\/([0-9a-f-]+)\/package$/.exec(url.pathname);
+  if(req.method==="POST" && packageMatch) {
+    const agentVersionId=packageMatch[1]!;
+    const role=await authorityRoleForAgentVersion(user.id,agentVersionId);
+    if(!role) return json(res,403,{error:"packaging_authority_required"});
+    const body=await readJson(req);
+    const releaseVersion=typeof body.releaseVersion==="string"?body.releaseVersion.trim():"";
+    const idempotencyKey=typeof body.idempotencyKey==="string"?body.idempotencyKey.trim():"";
+    if(!releaseVersion) return json(res,400,{error:"release_version_required"});
+    if(idempotencyKey.length<8) return json(res,400,{error:"idempotency_key_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const existingByKey=await client.query(
+          `SELECT id,agent_version_id,release_id,package_sha256,package_manifest,created_at::text
+           FROM release_package_records WHERE idempotency_key=$1`,
+          [idempotencyKey],
+        );
+        if(existingByKey.rowCount) {
+          const existing=existingByKey.rows[0];
+          if(existing.agent_version_id!==agentVersionId) throw new Error("idempotency_key_conflict");
+          return {
+            packageRecordId:existing.id,
+            releaseId:existing.release_id,
+            packageSha256:existing.package_sha256,
+            manifest:existing.package_manifest,
+            packagingStatus:"PACKAGED",
+            idempotentReplay:true,
+          };
+        }
+
+        const existingPackage=await client.query(
+          "SELECT id FROM release_package_records WHERE agent_version_id=$1",
+          [agentVersionId],
+        );
+        if(existingPackage.rowCount) throw new Error("package_already_exists");
+
+        const context=await client.query<{
+          registry_id:string; version:string; status:string;
+          aps_document:any; aps_sha256:string;
+          evaluation_plan_id:string; aggregate_outcome:string;
+          certification_record_id:string; certification_evidence:any; certifier_role:string;
+          release_approval_id:string; rights_status:string; intended_distribution:string; approver_role:string;
+        }>(
+          `SELECT a.registry_id,av.version,av.status,
+                  aps.document aps_document,aps.sha256 aps_sha256,
+                  ep.id evaluation_plan_id,ep.aggregate_outcome,
+                  cr.id certification_record_id,cr.evidence_bundle certification_evidence,cr.certifier_role,
+                  ra.id release_approval_id,ra.rights_status,ra.intended_distribution,ra.approver_role
+           FROM agent_versions av
+           JOIN agents a ON a.id=av.agent_id
+           JOIN aps_specifications aps ON aps.agent_version_id=av.id
+           JOIN evaluation_plans ep ON ep.agent_version_id=av.id
+           JOIN certification_records cr ON cr.agent_version_id=av.id AND cr.decision='CERTIFY'
+           JOIN release_approval_records ra ON ra.agent_version_id=av.id AND ra.decision='APPROVE'
+           JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+           WHERE av.id=$1
+             AND av.status='CERTIFIED'
+             AND l.release_approval_status='APPROVED'
+             AND l.packaging_status='NOT_PACKAGED'
+           FOR UPDATE OF av,l`,
+          [agentVersionId],
+        );
+        const item=context.rows[0];
+        if(!item) throw new Error("package_not_authorized");
+
+        const runs=await client.query<{
+          id:string;outcome:string;suite_key:string;
+        }>(
+          `SELECT er.id,er.outcome,es.suite_key
+           FROM evaluation_runs er
+           JOIN evaluation_suites es ON es.id=er.evaluation_suite_id
+           WHERE er.agent_version_id=$1
+           ORDER BY er.created_at`,
+          [agentVersionId],
+        );
+
+        const built=buildReleaseBundle({
+          releaseVersion,
+          registryId:item.registry_id,
+          agentVersion:item.version,
+          aps:item.aps_document,
+          apsSha256:item.aps_sha256,
+          evaluationPlan:{id:item.evaluation_plan_id,aggregateOutcome:item.aggregate_outcome},
+          evaluationRuns:runs.rows.map(r=>({id:r.id,outcome:r.outcome,suiteKey:r.suite_key})),
+          certification:{id:item.certification_record_id,evidenceBundle:item.certification_evidence,certifierRole:item.certifier_role},
+          releaseApproval:{id:item.release_approval_id,rightsStatus:item.rights_status,intendedDistribution:item.intended_distribution,approverRole:item.approver_role},
+        });
+
+        const digestResult=await client.query<{sha256:string}>(
+          "SELECT encode(digest(convert_to($1::jsonb::text,'UTF8'),'sha256'),'hex') sha256",
+          [JSON.stringify(built.content)],
+        );
+        const packageSha256=digestResult.rows[0]!.sha256;
+        const manifest={...built.manifest,packageSha256};
+
+        const release=await client.query<{id:string}>(
+          `INSERT INTO releases(agent_version_id,release_version,integrity_sha256)
+           VALUES ($1,$2,$3)
+           RETURNING id`,
+          [agentVersionId,releaseVersion,packageSha256],
+        );
+
+        const packageRecord=await client.query<{id:string}>(
+          `INSERT INTO release_package_records(
+             agent_version_id,release_approval_id,release_id,package_sha256,package_location,
+             idempotency_key,package_manifest,package_content,created_by_user_id
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9)
+           RETURNING id`,
+          [
+            agentVersionId,item.release_approval_id,release.rows[0]!.id,packageSha256,
+            "database://release_package_records",idempotencyKey,
+            JSON.stringify(manifest),JSON.stringify(built.content),user.id,
+          ],
+        );
+
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET packaging_status='PACKAGED',updated_at=now()
+           WHERE agent_version_id=$1`,
+          [agentVersionId],
+        );
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,authority_reference,evidence)
+           VALUES ($1,'release_package_created','release_package',$2,$3,$4::jsonb)`,
+          [
+            user.id,packageRecord.rows[0]!.id,item.release_approval_id,
+            JSON.stringify({agentVersionId,releaseVersion,packageSha256,idempotencyKey,runtimeTargets:["generic","openai"]}),
+          ],
+        );
+
+        return {
+          packageRecordId:packageRecord.rows[0]!.id,
+          releaseId:release.rows[0]!.id,
+          packageSha256,
+          manifest,
+          packagingStatus:"PACKAGED",
+          publicationStatus:"NOT_PUBLISHED",
+          frankaiRegistrationStatus:"NOT_REGISTERED",
+          idempotentReplay:false,
+        };
+      });
+      return json(res,201,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["idempotency_key_conflict","package_already_exists","package_not_authorized"].includes(message) || message.includes("packaging requires")) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
+  const publishMatch=/^\/v1\/release-packages\/([0-9a-f-]+)\/publish$/.exec(url.pathname);
+  if(req.method==="POST" && publishMatch) {
+    const packageRecordId=publishMatch[1]!;
+    const role=await authorityRoleForReleasePackage(user.id,packageRecordId);
+    if(!role) return json(res,403,{error:"publication_authority_required"});
+    const body=await readJson(req);
+    const channel=typeof body.channel==="string"?body.channel.trim():"";
+    const idempotencyKey=typeof body.idempotencyKey==="string"?body.idempotencyKey.trim():"";
+    const externalReference=typeof body.externalReference==="string"?body.externalReference.trim():null;
+    if(channel.length<2) return json(res,400,{error:"publication_channel_required"});
+    if(idempotencyKey.length<8) return json(res,400,{error:"idempotency_key_required"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const existingByKey=await client.query(
+          `SELECT id,release_package_record_id,channel,external_reference,publication_payload,published_at::text
+           FROM publication_records WHERE idempotency_key=$1`,
+          [idempotencyKey],
+        );
+        if(existingByKey.rowCount) {
+          const existing=existingByKey.rows[0];
+          if(existing.release_package_record_id!==packageRecordId || existing.channel!==channel) {
+            throw new Error("idempotency_key_conflict");
+          }
+          return {
+            publicationRecordId:existing.id,
+            packageRecordId,
+            channel:existing.channel,
+            externalReference:existing.external_reference,
+            payload:existing.publication_payload,
+            publicationStatus:"PUBLISHED",
+            idempotentReplay:true,
+          };
+        }
+
+        const existingPublication=await client.query(
+          "SELECT id FROM publication_records WHERE release_package_record_id=$1 AND channel=$2",
+          [packageRecordId,channel],
+        );
+        if(existingPublication.rowCount) throw new Error("publication_already_exists");
+
+        const context=await client.query<{
+          agent_version_id:string;package_sha256:string;package_manifest:any;
+          release_id:string;release_version:string;registry_id:string;version:string;rights_status:string;
+        }>(
+          `SELECT rp.agent_version_id,rp.package_sha256,rp.package_manifest,
+                  r.id release_id,r.release_version,a.registry_id,av.version,ra.rights_status
+           FROM release_package_records rp
+           JOIN releases r ON r.id=rp.release_id
+           JOIN agent_versions av ON av.id=rp.agent_version_id
+           JOIN agents a ON a.id=av.agent_id
+           JOIN release_approval_records ra ON ra.id=rp.release_approval_id
+           JOIN lifecycle_readiness l ON l.agent_version_id=rp.agent_version_id
+           WHERE rp.id=$1
+             AND l.packaging_status='PACKAGED'
+             AND l.publication_status='NOT_PUBLISHED'
+           FOR UPDATE OF l`,
+          [packageRecordId],
+        );
+        const item=context.rows[0];
+        if(!item) throw new Error("package_not_publishable");
+
+        const runtimeTargets=Array.isArray(item.package_manifest?.runtimeTargets)
+          ? item.package_manifest.runtimeTargets
+          : ["generic","openai"];
+        const payload=buildPublicationPayload({
+          packageRecordId,
+          packageSha256:item.package_sha256,
+          releaseId:item.release_id,
+          releaseVersion:item.release_version,
+          registryId:item.registry_id,
+          agentVersion:item.version,
+          channel,
+          rightsStatus:item.rights_status,
+          runtimeTargets,
+        });
+
+        const record=await client.query<{id:string}>(
+          `INSERT INTO publication_records(
+             release_package_record_id,channel,external_reference,published_by_user_id,
+             idempotency_key,publication_payload,status
+           ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,'PUBLISHED')
+           RETURNING id`,
+          [packageRecordId,channel,externalReference,user.id,idempotencyKey,JSON.stringify(payload)],
+        );
+
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET publication_status='PUBLISHED',updated_at=now()
+           WHERE agent_version_id=$1`,
+          [item.agent_version_id],
+        );
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
+           VALUES ($1,'release_published','publication',$2,$3::jsonb)`,
+          [user.id,record.rows[0]!.id,JSON.stringify({packageRecordId,channel,idempotencyKey,externalReference})],
+        );
+
+        return {
+          publicationRecordId:record.rows[0]!.id,
+          packageRecordId,
+          channel,
+          externalReference,
+          payload,
+          publicationStatus:"PUBLISHED",
+          frankaiRegistrationStatus:"NOT_REGISTERED",
+          idempotentReplay:false,
+        };
+      });
+      return json(res,201,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(["idempotency_key_conflict","publication_already_exists","package_not_publishable"].includes(message) || message.includes("publication requires")) {
+        return json(res,409,{error:message});
+      }
+      throw error;
+    }
+  }
+
+  const registerMatch=/^\/v1\/publications\/([0-9a-f-]+)\/frankai-register$/.exec(url.pathname);
+  if(req.method==="POST" && registerMatch) {
+    const publicationId=registerMatch[1]!;
+    const role=await authorityRoleForPublication(user.id,publicationId);
+    if(!role) return json(res,403,{error:"frankai_registration_authority_required"});
+    const body=await readJson(req);
+    const idempotencyKey=typeof body.idempotencyKey==="string"?body.idempotencyKey.trim():"";
+    if(idempotencyKey.length<8) return json(res,400,{error:"idempotency_key_required"});
+
+    const existing=await query<{
+      id:string;publication_record_id:string;registration_reference:string;request_payload:any;response_payload:any;
+    }>(
+      "SELECT id,publication_record_id,registration_reference,request_payload,response_payload FROM frankai_registration_records WHERE idempotency_key=$1",
+      [idempotencyKey],
+    );
+    if(existing.rowCount) {
+      const row=existing.rows[0]!;
+      if(row.publication_record_id!==publicationId) return json(res,409,{error:"idempotency_key_conflict"});
+      return json(res,200,{
+        registrationRecordId:row.id,
+        publicationRecordId:publicationId,
+        registrationReference:row.registration_reference,
+        requestPayload:row.request_payload,
+        responsePayload:row.response_payload,
+        frankaiRegistrationStatus:"REGISTERED",
+        idempotentReplay:true,
+      });
+    }
+
+    const existingForPublication=await query(
+      "SELECT id FROM frankai_registration_records WHERE publication_record_id=$1",
+      [publicationId],
+    );
+    if(existingForPublication.rowCount) return json(res,409,{error:"frankai_registration_already_exists"});
+
+    const context=await query<{
+      agent_version_id:string;publication_payload:any;publication_status:string;
+    }>(
+      `SELECT rp.agent_version_id,p.publication_payload,l.publication_status
+       FROM publication_records p
+       JOIN release_package_records rp ON rp.id=p.release_package_record_id
+       JOIN lifecycle_readiness l ON l.agent_version_id=rp.agent_version_id
+       WHERE p.id=$1`,
+      [publicationId],
+    );
+    const item=context.rows[0];
+    if(!item || item.publication_status!=="PUBLISHED") return json(res,409,{error:"publication_not_registerable"});
+
+    const registryUrl=process.env.FRANKAI_REGISTRY_URL;
+    if(!registryUrl) return json(res,503,{error:"frankai_registry_not_configured"});
+
+    const payload=buildFrankAIRegistrationPayload({
+      publicationRecordId:publicationId,
+      publicationPayload:item.publication_payload,
+    });
+
+    let registryResponse:Response;
+    try {
+      registryResponse=await fetch(registryUrl,{
+        method:"POST",
+        headers:{"content-type":"application/json","idempotency-key":idempotencyKey},
+        body:JSON.stringify(payload),
+      });
+    } catch {
+      return json(res,502,{error:"frankai_registry_unreachable"});
+    }
+
+    const responseText=await registryResponse.text();
+    let responsePayload:any={};
+    try { responsePayload=responseText?JSON.parse(responseText):{}; }
+    catch { responsePayload={raw:responseText}; }
+
+    if(!registryResponse.ok) {
+      return json(res,502,{error:"frankai_registry_rejected",status:registryResponse.status,response:responsePayload});
+    }
+    const registrationReference=typeof responsePayload.registration_reference==="string"
+      ? responsePayload.registration_reference
+      : typeof responsePayload.id==="string"
+        ? responsePayload.id
+        : null;
+    if(!registrationReference) return json(res,502,{error:"frankai_registry_missing_reference"});
+
+    try {
+      const result=await transaction(async(client)=>{
+        const recheck=await client.query("SELECT id FROM frankai_registration_records WHERE publication_record_id=$1",[publicationId]);
+        if(recheck.rowCount) throw new Error("frankai_registration_already_exists");
+
+        const record=await client.query<{id:string}>(
+          `INSERT INTO frankai_registration_records(
+             publication_record_id,registration_reference,idempotency_key,
+             request_payload,response_payload,status
+           ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,'REGISTERED')
+           RETURNING id`,
+          [publicationId,registrationReference,idempotencyKey,JSON.stringify(payload),JSON.stringify(responsePayload)],
+        );
+
+        await client.query(
+          `UPDATE lifecycle_readiness
+           SET frankai_registration_status='REGISTERED',updated_at=now()
+           WHERE agent_version_id=$1`,
+          [item.agent_version_id],
+        );
+        await client.query(
+          `INSERT INTO audit_records(actor,action,target_type,target_id,evidence)
+           VALUES ($1,'frankai_release_registered','frankai_registration',$2,$3::jsonb)`,
+          [user.id,record.rows[0]!.id,JSON.stringify({publicationId,registrationReference,idempotencyKey})],
+        );
+
+        return {
+          registrationRecordId:record.rows[0]!.id,
+          publicationRecordId:publicationId,
+          registrationReference,
+          requestPayload:payload,
+          responsePayload,
+          frankaiRegistrationStatus:"REGISTERED",
+          idempotentReplay:false,
+        };
+      });
+      return json(res,201,result);
+    } catch(error) {
+      const message=error instanceof Error?error.message:String(error);
+      if(message==="frankai_registration_already_exists") return json(res,409,{error:message});
+      throw error;
+    }
+  }
+
   const authorityStateMatch=/^\/v1\/agent-versions\/([0-9a-f-]+)\/authority-state$/.exec(url.pathname);
   if(req.method==="GET" && authorityStateMatch) {
     const agentVersionId=authorityStateMatch[1]!;
@@ -1159,13 +1600,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if(!state.rows[0]) return json(res,404,{error:"not_found"});
 
     const packageRecords=await query(
-      `SELECT id,release_id,package_sha256,package_location,created_at::text
+      `SELECT id,release_id,package_sha256,package_location,idempotency_key,
+              package_manifest,created_at::text
        FROM release_package_records WHERE agent_version_id=$1 ORDER BY created_at`,
       [agentVersionId],
     );
     const publication=await query(
-      `SELECT p.id,p.channel,p.external_reference,p.published_at::text,
-              f.id frankai_registration_id,f.registration_reference,f.registered_at::text
+      `SELECT p.id,p.channel,p.external_reference,p.idempotency_key,p.publication_payload,
+              p.published_at::text,
+              f.id frankai_registration_id,f.registration_reference,f.idempotency_key frankai_idempotency_key,
+              f.request_payload frankai_request_payload,f.response_payload frankai_response_payload,
+              f.registered_at::text
        FROM release_package_records rp
        JOIN publication_records p ON p.release_package_record_id=rp.id
        LEFT JOIN frankai_registration_records f ON f.publication_record_id=p.id
