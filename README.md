@@ -82,3 +82,31 @@ Protected `main` requires the Phase Zero integrity checks. See:
 - `docs/architecture/PHASE-1-ACCEPTANCE.md`
 
 A foundation candidate is intentionally conservative: no inferred capabilities, tool access, execution authority, or delegation authority are added before governed PromptForge review.
+
+## Phase 2 PromptForge
+
+PromptForge now supports a governed staged model-backed transformation pipeline:
+
+```text
+Source Prompt
+  -> Intent Analysis
+  -> Defect Analysis
+  -> Capability Extraction
+  -> Governance Construction
+  -> Deterministic APS Builder
+  -> Hard Governance Validation
+  -> Reviewer Diff + Explanation
+  -> DRAFT / REQUIRES_REVIEW
+```
+
+The model analyses and proposes. Deterministic application code owns authority-bearing APS fields. Model output cannot grant execution authority, delegation authority, runtime tool bindings, promotion, certification, or release.
+
+For credentialed OpenAI execution:
+
+```bash
+PROMPTFORGE_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=...
+```
+
+CI uses the deterministic provider through the same engine contract and separately tests the OpenAI Responses API adapter against a local protocol mock.
