@@ -102,6 +102,7 @@ export class ArtifactStore {
     return {
       byteSize:Number(result.ContentLength??0),
       sha256:result.Metadata?.sha256??null,
+      mediaType:result.ContentType??"application/octet-stream",
       etag:result.ETag??null,
     };
   }
