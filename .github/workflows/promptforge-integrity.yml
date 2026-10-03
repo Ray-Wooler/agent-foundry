@@ -2,12 +2,6 @@ name: PromptForge Integrity
 
 on:
   pull_request:
-    paths:
-      - "schemas/promptforge/**"
-      - "scripts/validate_promptforge.py"
-      - "tests/fixtures/promptforge/**"
-      - "docs/architecture/ADR/0006-promptforge-transformation.md"
-      - ".github/workflows/promptforge-integrity.yml"
   push:
     branches: [main]
     paths:
