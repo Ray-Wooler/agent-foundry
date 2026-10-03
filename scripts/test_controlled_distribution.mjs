@@ -138,10 +138,24 @@ state=await call("/v1/agent-versions/"+subject.agentVersionId+"/authority-state"
 assert(state.publications.length===1,"exactly one publication must exist");
 assert(!state.publications[0].frankai_registration_id,"publication must still be unregistered");
 
-const registrationKey="reg-phase6-idem-0001";
-const registration1=await call("/v1/publications/"+publication1.publicationRecordId+"/frankai-register",{method:"POST",body:JSON.stringify({
-  idempotencyKey:registrationKey
-})},token);
+async function rawRegister(key){
+  const response=await fetch(api+"/v1/publications/"+publication1.publicationRecordId+"/frankai-register",{
+    method:"POST",
+    headers:{"content-type":"application/json",authorization:"Bearer "+token},
+    body:JSON.stringify({idempotencyKey:key}),
+  });
+  return {key,status:response.status,body:await response.json().catch(()=>({}))};
+}
+
+const concurrentRegistrations=await Promise.all([
+  rawRegister("reg-phase6-idem-0001"),
+  rawRegister("reg-phase6-concurrent-0002"),
+]);
+assert(concurrentRegistrations.filter(x=>x.status===201).length===1,"one concurrent registration request must win");
+assert(concurrentRegistrations.filter(x=>x.status===409).length===1,"different-key concurrent registration must receive controlled 409");
+const winningRegistration=concurrentRegistrations.find(x=>x.status===201);
+const registrationKey=winningRegistration.key;
+const registration1=winningRegistration.body;
 assert(registration1.frankaiRegistrationStatus==="REGISTERED","registration must succeed");
 assert(typeof registration1.registrationReference==="string"&&registration1.registrationReference.length>0,"registration reference required");
 

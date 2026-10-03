@@ -91,6 +91,9 @@ BEGIN
   IF NOT NEW.historical_content_available AND NEW.package_content IS NOT NULL THEN
     RAISE EXCEPTION 'historical package content is unavailable';
   END IF;
+  IF NOT NEW.historical_content_available THEN
+    RAISE EXCEPTION 'historical_content_available=false is reserved for legacy migration backfill';
+  END IF;
   RETURN NEW;
 END $$;
 

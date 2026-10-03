@@ -70,3 +70,26 @@ test("registration effect claim rejects simultaneous different keys",{skip:!data
     await a.query("DELETE FROM frankai_registration_attempts WHERE publication_record_id=$1",[publicationId]);
   } finally { await Promise.all([a.end(),b.end()]); }
 });
+
+test("new package inserts cannot self-declare unavailable historical content",{skip:!databaseUrl},async()=>{
+  const {Client}=await import("pg");
+  const client=new Client({connectionString:databaseUrl});
+  await client.connect();
+  try {
+    const row=await client.query(`
+      SELECT rp.agent_version_id,rp.release_approval_id,rp.release_id,rp.created_by_user_id
+      FROM release_package_records rp ORDER BY rp.created_at LIMIT 1`);
+    assert.equal(row.rowCount>0,true,"synthetic package required");
+    await assert.rejects(
+      client.query(`
+        INSERT INTO release_package_records(
+          agent_version_id,release_approval_id,release_id,package_sha256,package_location,
+          idempotency_key,package_manifest,package_content,historical_content_available,created_by_user_id
+        ) VALUES ($1,$2,$3,$4,'test://negative',$5,'{}'::jsonb,NULL,false,$6)`,
+        [row.rows[0].agent_version_id,row.rows[0].release_approval_id,row.rows[0].release_id,
+          "b".repeat(64),"negative-unavailable-key",row.rows[0].created_by_user_id],
+      ),
+      /historical_content_available=false is reserved/,
+    );
+  } finally { await client.end(); }
+});
