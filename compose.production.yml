@@ -19,36 +19,6 @@ services:
       retries: 10
     networks: [backend]
 
-  minio:
-    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
-    command: server /data --console-address ":9001"
-    restart: unless-stopped
-    environment:
-      MINIO_ROOT_USER_FILE: /run/secrets/object_storage_access_key
-      MINIO_ROOT_PASSWORD_FILE: /run/secrets/object_storage_secret_key
-    secrets: [object_storage_access_key,object_storage_secret_key]
-    volumes:
-      - object-data:/data
-    healthcheck:
-      test: ["CMD","curl","-f","http://localhost:9000/minio/health/live"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks: [backend]
-
-  minio-init:
-    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: ["/bin/sh","-c"]
-    command: >
-      MC_HOST_foundry=http://$(cat /run/secrets/object_storage_access_key):$(cat /run/secrets/object_storage_secret_key)@minio:9000
-      mc mb --ignore-existing foundry/agent-foundry &&
-      mc version enable foundry/agent-foundry
-    secrets: [object_storage_access_key,object_storage_secret_key]
-    networks: [backend]
-
   api:
     build: .
     restart: unless-stopped
@@ -66,23 +36,22 @@ services:
       OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
       OPENAI_MODEL: ${OPENAI_MODEL}
       FRANKAI_REGISTRY_URL: ${FRANKAI_REGISTRY_URL}
-      OBJECT_STORAGE_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_REGION: us-east-1
-      OBJECT_STORAGE_BUCKET: agent-foundry
-      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-false}
       OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/object_storage_access_key
       OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/object_storage_secret_key
       APP_VERSION: ${APP_VERSION}
     secrets: [database_url,bootstrap_admin_password,openai_api_key,object_storage_access_key,object_storage_secret_key]
     depends_on:
       postgres: {condition: service_healthy}
-      minio-init: {condition: service_completed_successfully}
     healthcheck:
       test: ["CMD","node","-e","fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 10
-    networks: [backend,edge]
+    networks: [backend,edge,egress]
 
   worker:
     build: .
@@ -96,18 +65,17 @@ services:
       PROMPTFORGE_PROVIDER: ${PROMPTFORGE_PROVIDER:-openai}
       OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
       OPENAI_MODEL: ${OPENAI_MODEL}
-      OBJECT_STORAGE_ENDPOINT: http://minio:9000
-      OBJECT_STORAGE_REGION: us-east-1
-      OBJECT_STORAGE_BUCKET: agent-foundry
-      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT}
+      OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+      OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET}
+      OBJECT_STORAGE_FORCE_PATH_STYLE: ${OBJECT_STORAGE_FORCE_PATH_STYLE:-false}
       OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/object_storage_access_key
       OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/object_storage_secret_key
       APP_VERSION: ${APP_VERSION}
     secrets: [database_url,openai_api_key,object_storage_access_key,object_storage_secret_key]
     depends_on:
       postgres: {condition: service_healthy}
-      minio-init: {condition: service_completed_successfully}
-    networks: [backend]
+    networks: [backend,egress]
 
   web:
     build: .
@@ -162,12 +130,12 @@ services:
 
 networks:
   edge:
+  egress:
   backend:
     internal: true
 
 volumes:
   postgres-data:
-  object-data:
   caddy-data:
   caddy-config:
   prometheus-data:
