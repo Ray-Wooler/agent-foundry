@@ -2,6 +2,7 @@ const api=process.env.API_PUBLIC_URL??"http://localhost:3001";
 const mock=process.env.MOCK_FRANKAI_URL??"http://127.0.0.1:4010";
 const email=process.env.BOOTSTRAP_ADMIN_EMAIL??"admin@example.com";
 const password=process.env.BOOTSTRAP_ADMIN_PASSWORD??"phase1-test-password";
+const runSuffix=process.env.TEST_RUN_ID??Date.now().toString(36);
 
 function assert(condition,message){if(!condition)throw new Error(message);}
 async function call(path,options={},token,expectedStatus){
@@ -78,7 +79,7 @@ assert(pre.authorityState.publication_status==="NOT_PUBLISHED","must begin unpub
 assert(pre.authorityState.frankai_registration_status==="NOT_REGISTERED","must begin unregistered");
 
 await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
-  releaseVersion:"1.0.0",idempotencyKey:"pkg-before-approval-0000"
+  releaseVersion:"1.0.0",idempotencyKey:`pkg-before-approval-${runSuffix}`
 })},token,409);
 
 const approval=await call("/v1/agent-versions/"+subject.agentVersionId+"/release-approval",{method:"POST",body:JSON.stringify({
@@ -88,7 +89,7 @@ const approval=await call("/v1/agent-versions/"+subject.agentVersionId+"/release
 })},token);
 assert(approval.releaseApprovalStatus==="APPROVED","release approval must precede packaging");
 
-const packageKey="pkg-phase6-idem-0001";
+const packageKey=`pkg-phase6-idem-${runSuffix}`;
 const package1=await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
   releaseVersion:"1.0.0",idempotencyKey:packageKey
 })},token);
@@ -106,14 +107,14 @@ assert(packageReplay.packageRecordId===package1.packageRecordId,"package replay 
 assert(packageReplay.packageSha256===package1.packageSha256,"package replay digest must match");
 
 await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
-  releaseVersion:"1.0.1",idempotencyKey:"pkg-phase6-conflict-0002"
+  releaseVersion:"1.0.1",idempotencyKey:`pkg-phase6-conflict-${runSuffix}`
 })},token,409);
 
 let state=await call("/v1/agent-versions/"+subject.agentVersionId+"/authority-state",{},token);
 assert(state.releasePackages.length===1,"exactly one package must exist");
 assert(state.publications.length===0,"package creation must not publish");
 
-const publicationKey="pub-phase6-idem-0001";
+const publicationKey=`pub-phase6-idem-${runSuffix}`;
 const publication1=await call("/v1/release-packages/"+package1.packageRecordId+"/publish",{method:"POST",body:JSON.stringify({
   channel:"foundry-internal",
   externalReference:"foundry://releases/phase6",
@@ -131,7 +132,7 @@ assert(publicationReplay.idempotentReplay===true,"publication same-key retry mus
 assert(publicationReplay.publicationRecordId===publication1.publicationRecordId,"publication replay must return same record");
 
 await call("/v1/release-packages/"+package1.packageRecordId+"/publish",{method:"POST",body:JSON.stringify({
-  channel:"foundry-internal",idempotencyKey:"pub-phase6-conflict-0002"
+  channel:"foundry-internal",idempotencyKey:`pub-phase6-conflict-${runSuffix}`
 })},token,409);
 
 state=await call("/v1/agent-versions/"+subject.agentVersionId+"/authority-state",{},token);
@@ -148,8 +149,8 @@ async function rawRegister(key){
 }
 
 const concurrentRegistrations=await Promise.all([
-  rawRegister("reg-phase6-idem-0001"),
-  rawRegister("reg-phase6-concurrent-0002"),
+  rawRegister(`reg-phase6-idem-${runSuffix}`),
+  rawRegister(`reg-phase6-concurrent-${runSuffix}`),
 ]);
 assert(concurrentRegistrations.filter(x=>x.status===201).length===1,"one concurrent registration request must win");
 assert(concurrentRegistrations.filter(x=>x.status===409).length===1,"different-key concurrent registration must receive controlled 409");
@@ -158,16 +159,18 @@ const registrationKey=winningRegistration.key;
 const registration1=winningRegistration.body;
 assert(registration1.frankaiRegistrationStatus==="REGISTERED","registration must succeed");
 assert(typeof registration1.registrationReference==="string"&&registration1.registrationReference.length>0,"registration reference required");
+assert(typeof registration1.requestPayload?.published_at==="string","registration must persist publication timestamp");
 
 const registrationReplay=await call("/v1/publications/"+publication1.publicationRecordId+"/frankai-register",{method:"POST",body:JSON.stringify({
   idempotencyKey:registrationKey
 })},token);
 assert(registrationReplay.idempotentReplay===true,"registration same-key retry must replay");
 assert(registrationReplay.registrationRecordId===registration1.registrationRecordId,"registration replay must return same record");
+assert(registrationReplay.requestPayload.published_at===registration1.requestPayload.published_at,"registration retry must reuse persisted publication timestamp");
 assert(registrationReplay.registrationReference===registration1.registrationReference,"registration replay reference must match");
 
 await call("/v1/publications/"+publication1.publicationRecordId+"/frankai-register",{method:"POST",body:JSON.stringify({
-  idempotencyKey:"reg-phase6-conflict-0002"
+  idempotencyKey:`reg-phase6-conflict-${runSuffix}`
 })},token,409);
 
 state=await call("/v1/agent-versions/"+subject.agentVersionId+"/authority-state",{},token);

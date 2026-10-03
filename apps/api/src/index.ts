@@ -1478,6 +1478,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         const runtimeTargets=Array.isArray(item.package_manifest?.runtimeTargets)
           ? item.package_manifest.runtimeTargets
           : ["generic","openai"];
+        const publishedAt=new Date().toISOString();
         const payload=buildPublicationPayload({
           packageRecordId,
           packageSha256:item.package_sha256,
@@ -1493,15 +1494,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
           evaluationAggregate:item.package_manifest?.evaluationAggregate,
           evaluationRequiredOutcome:item.package_manifest?.evaluationRequiredOutcome,
           evaluationRunIds:item.package_manifest?.evaluationRunIds,
+          publishedAt,
         });
 
         const record=await client.query<{id:string}>(
           `INSERT INTO publication_records(
              release_package_record_id,channel,external_reference,published_by_user_id,
-             idempotency_key,publication_payload,status
-           ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,'PUBLISHED')
+             idempotency_key,publication_payload,published_at,status
+           ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,'PUBLISHED')
            RETURNING id`,
-          [packageRecordId,channel,externalReference,user.id,idempotencyKey,JSON.stringify(payload)],
+          [packageRecordId,channel,externalReference,user.id,idempotencyKey,JSON.stringify(payload),publishedAt],
         );
 
         const publicationObjectKey=`workspaces/${item.workspace_id}/agents/${item.registry_id}/versions/${item.version}/publications/${record.rows[0]!.id}.json`;

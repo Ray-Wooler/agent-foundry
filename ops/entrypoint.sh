@@ -4,7 +4,7 @@ set -eu
 load_secret() {
   name="$1"
   file_var="${name}_FILE"
-  eval "file=${$file_var:-}"
+  eval "file=\${$file_var:-}"
   if [ -n "${file:-}" ]; then
     if [ ! -r "$file" ]; then
       echo "secret file for $name is not readable: $file" >&2
