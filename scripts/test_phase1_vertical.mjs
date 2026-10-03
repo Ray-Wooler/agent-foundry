@@ -62,11 +62,18 @@ assert(result, "transformation result required");
 assert(result.status === "REQUIRES_REVIEW", `expected REQUIRES_REVIEW, got ${result.status}`);
 assert(result.candidate, "candidate APS required");
 assert(result.transformationRecord?.status === "REQUIRES_REVIEW", "transformation record must require review");
-assert(Array.isArray(result.candidate.capabilities) && result.candidate.capabilities.length === 0, "foundation candidate must not invent capabilities");
+assert(Array.isArray(result.candidate.capabilities) && result.candidate.capabilities.length > 0, "PromptForge must extract conceptual capabilities");
 assert(result.candidate.governance?.authority?.execution?.length === 0, "foundation candidate must not invent execution authority");
 assert(result.candidate.governance?.authority?.delegation?.length === 0, "foundation candidate must not invent delegation authority");
 assert(result.candidate.governance?.retrieved_content_is_data === true, "source content must remain data");
-assert(result.candidate.extensions?.intake?.rights_status === "UNVERIFIED", "rights status must be preserved");
+assert(result.candidate.extensions?.promptforge?.rights_status === "UNVERIFIED", "rights status must be preserved");
+assert(result.candidate.extensions?.promptforge?.review_state === "REQUIRES_REVIEW", "candidate must remain review-gated");
+assert(result.provider === "deterministic-ci", "CI must exercise deterministic PromptForge provider");
+assert(result.validationStatus === "PASS", "PromptForge candidate must pass hard governance validation");
+assert(Array.isArray(result.stages) && result.stages.length === 5, "all five PromptForge stages must be persisted");
+assert(result.reviewPackage?.explanation, "review explanation required");
+assert(Array.isArray(result.reviewPackage?.candidateDiff) && result.reviewPackage.candidateDiff.length > 0, "reviewer diff required");
+assert(result.reviewPackage?.validation?.status === "PASS", "review package validation must pass");
 
 console.log(JSON.stringify({
   status: "PASS",
