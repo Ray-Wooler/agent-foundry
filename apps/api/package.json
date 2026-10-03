@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx watch src/index.ts",
+    "dev": "pnpm --filter @agent-foundry/db build && pnpm --filter @agent-foundry/auth build && pnpm --filter @agent-foundry/domain build && tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "node --test"
   },
