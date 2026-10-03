@@ -162,6 +162,19 @@ CREATE TABLE audit_records (
   recorded_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE OR REPLACE FUNCTION require_initial_agent_version_draft()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status <> 'DRAFT' THEN
+    RAISE EXCEPTION 'AgentVersion must be created in DRAFT state';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER trg_agent_version_initial_draft
+BEFORE INSERT ON agent_versions
+FOR EACH ROW EXECUTE FUNCTION require_initial_agent_version_draft();
+
 CREATE OR REPLACE FUNCTION validate_agent_version_promotion()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
