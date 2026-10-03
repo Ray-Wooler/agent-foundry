@@ -56,7 +56,7 @@ BEFORE UPDATE OR DELETE ON semantic_reviews
 FOR EACH ROW EXECUTE FUNCTION prevent_semantic_review_mutation();
 
 CREATE OR REPLACE FUNCTION prevent_revision_lineage_mutation()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP='UPDATE'
      AND OLD.child_agent_version_id IS NULL
@@ -70,7 +70,7 @@ BEGIN
     RETURN NEW;
   END IF;
   RAISE EXCEPTION 'candidate revision lineage is immutable';
-END $;
+END $$;
 
 CREATE TRIGGER trg_candidate_revision_lineage_immutable
 BEFORE UPDATE OR DELETE ON candidate_revision_lineage
