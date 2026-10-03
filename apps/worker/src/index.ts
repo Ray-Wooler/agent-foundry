@@ -585,11 +585,20 @@ async function failOperationalJob(job:OperationalJob,error:unknown) {
        WHERE id=$4`,
       [dead?"DEAD":"RETRY",reason.slice(0,2000),String(delaySeconds),job.id],
     );
+    const artifactObjectId=typeof job.payload.artifactObjectId==="string"?job.payload.artifactObjectId:null;
+    if(artifactObjectId) {
+      await client.query(
+        `UPDATE artifact_objects
+         SET storage_status=$1,attempts=attempts+1,last_error=$2
+         WHERE id=$3 AND storage_status<>'STORED'`,
+        [dead?"DEAD":"FAILED",reason.slice(0,2000),artifactObjectId],
+      );
+    }
     if(dead) {
       await client.query(
         `INSERT INTO security_events(workspace_id,event_type,severity,subject_type,subject_id,evidence)
          VALUES ($1,'operational_job_dead_letter','HIGH','operational_job',$2,$3::jsonb)`,
-        [job.workspace_id,job.id,JSON.stringify({jobType:job.job_type,error:reason.slice(0,1000),attempts:job.attempts})],
+        [job.workspace_id,job.id,JSON.stringify({jobType:job.job_type,error:reason.slice(0,1000),attempts:job.attempts,artifactObjectId})],
       );
     }
   });
