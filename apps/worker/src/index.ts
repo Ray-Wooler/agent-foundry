@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 const pollMs = Number(process.env.WORKER_POLL_MS ?? 1000);
 const engine = new PromptForgeEngine(createPromptForgeProviderFromEnvironment());
 const workerId=process.env.WORKER_ID??`worker-${randomUUID()}`;
+const operationalLeaseSeconds=Math.max(30,Number(process.env.OPERATIONAL_JOB_LEASE_SECONDS??120));
 let artifactStore:ArtifactStore|null=null;
 
 function getArtifactStore() {
@@ -544,11 +545,54 @@ async function heartbeat() {
 
 async function claimOperationalJob():Promise<OperationalJob|null> {
   return transaction(async(client)=>{
+    const expired=await client.query<{
+      id:string;workspace_id:string|null;job_type:string;payload:Record<string,unknown>;attempts:number;
+    }>(
+      `UPDATE operational_jobs
+       SET status='DEAD',
+           last_error=COALESCE(last_error,'worker lease expired after max attempts'),
+           locked_at=NULL,locked_by=NULL
+       WHERE status='RUNNING'
+         AND locked_at IS NOT NULL
+         AND locked_at<=now()-($1::text||' seconds')::interval
+         AND attempts>=max_attempts
+       RETURNING id,workspace_id,job_type,payload,attempts`,
+      [String(operationalLeaseSeconds)],
+    );
+    for(const job of expired.rows) {
+      const artifactObjectId=typeof job.payload.artifactObjectId==="string"?job.payload.artifactObjectId:null;
+      if(artifactObjectId) {
+        await client.query(
+          `UPDATE artifact_objects
+           SET storage_status='DEAD',
+               last_error=COALESCE(last_error,'worker lease expired after max attempts')
+           WHERE id=$1 AND storage_status<>'STORED'`,
+          [artifactObjectId],
+        );
+      }
+      await client.query(
+        `INSERT INTO security_events(workspace_id,event_type,severity,subject_type,subject_id,evidence)
+         VALUES ($1,'operational_job_dead_letter','HIGH','operational_job',$2,$3::jsonb)`,
+        [job.workspace_id,job.id,JSON.stringify({
+          jobType:job.job_type,
+          error:"worker lease expired after max attempts",
+          attempts:job.attempts,
+          artifactObjectId,
+        })],
+      );
+    }
+
     const result=await client.query<OperationalJob>(
       `WITH next AS (
          SELECT id FROM operational_jobs
-         WHERE status IN ('QUEUED','RETRY')
-           AND available_at<=now()
+         WHERE (
+           (status IN ('QUEUED','RETRY') AND available_at<=now())
+           OR
+           (status='RUNNING'
+             AND locked_at IS NOT NULL
+             AND locked_at<=now()-($2::text||' seconds')::interval
+             AND attempts<max_attempts)
+         )
          ORDER BY available_at,created_at
          FOR UPDATE SKIP LOCKED
          LIMIT 1
@@ -558,7 +602,7 @@ async function claimOperationalJob():Promise<OperationalJob|null> {
        FROM next
        WHERE j.id=next.id
        RETURNING j.id,j.workspace_id,j.job_type,j.payload,j.attempts,j.max_attempts`,
-      [workerId],
+      [workerId,String(operationalLeaseSeconds)],
     );
     return result.rows[0]??null;
   });
