@@ -5,6 +5,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { sha256Text } from "@agent-foundry/domain";
 
@@ -53,20 +54,28 @@ export class ArtifactStore {
     }
   }
 
-  async putJson(key:string,value:unknown,expectedSha256?:string) {
-    const body=JSON.stringify(value);
-    const sha256=sha256Text(body);
+  async putText(key:string,text:string,mediaType="application/json",expectedSha256?:string) {
+    const sha256=sha256Text(text);
     if(expectedSha256&&expectedSha256!==sha256) {
       throw new Error(`artifact digest mismatch before upload expected=${expectedSha256} actual=${sha256}`);
     }
     await this.client.send(new PutObjectCommand({
       Bucket:this.config.bucket,
       Key:key,
-      Body:body,
-      ContentType:"application/json",
+      Body:text,
+      ContentType:mediaType,
       Metadata:{sha256},
     }));
-    return {sha256,byteSize:Buffer.byteLength(body)};
+    return {sha256,byteSize:Buffer.byteLength(text)};
+  }
+
+  async putJson(key:string,value:unknown,expectedSha256?:string) {
+    const body=JSON.stringify(value);
+    const sha256=sha256Text(body);
+    if(expectedSha256&&expectedSha256!==sha256) {
+      throw new Error(`artifact digest mismatch before upload expected=${expectedSha256} actual=${sha256}`);
+    }
+    return this.putText(key,body,"application/json",expectedSha256);
   }
 
   async head(key:string) {
@@ -89,13 +98,31 @@ export class ArtifactStore {
     return head;
   }
 
-  async getJson<T=unknown>(key:string):Promise<T> {
+  async getText(key:string):Promise<string> {
     const result=await this.client.send(new GetObjectCommand({
       Bucket:this.config.bucket,
       Key:key,
     }));
     if(!result.Body) throw new Error("object storage returned empty body");
-    const text=await result.Body.transformToString();
-    return JSON.parse(text) as T;
+    return result.Body.transformToString();
+  }
+
+  async getJson<T=unknown>(key:string):Promise<T> {
+    return JSON.parse(await this.getText(key)) as T;
+  }
+
+  async listKeys(prefix=""):Promise<string[]> {
+    const keys:string[]=[];
+    let token:string|undefined;
+    do {
+      const result=await this.client.send(new ListObjectsV2Command({
+        Bucket:this.config.bucket,
+        Prefix:prefix||undefined,
+        ContinuationToken:token,
+      }));
+      for(const item of result.Contents??[]) if(item.Key) keys.push(item.Key);
+      token=result.IsTruncated?result.NextContinuationToken:undefined;
+    } while(token);
+    return keys;
   }
 }
