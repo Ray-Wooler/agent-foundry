@@ -22,6 +22,7 @@ permissions:
 
 jobs:
   compiler-integrity:
+    name: Compiler Integrity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
