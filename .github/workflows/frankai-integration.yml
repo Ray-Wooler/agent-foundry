@@ -47,13 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           cp .tmp/integration/release/release.manifest.json .tmp/integration/not-released.json
-          python - <<'PY'
-import json
-p=".tmp/integration/not-released.json"
-d=json.load(open(p))
-d["status"]="CERTIFIED"
-json.dump(d,open(p,"w"),indent=2)
-PY
+          python -c 'import json; p=".tmp/integration/not-released.json"; d=json.load(open(p)); d["status"]="CERTIFIED"; json.dump(d,open(p,"w"),indent=2)'
           if python scripts/build_frankai_publication.py             --release-manifest .tmp/integration/not-released.json             --aps agents/AGR-0001-automation-governance-architect/agent.aps.json             --out .tmp/integration/blocked.json; then
             echo "Expected non-RELEASED publication to fail"
             exit 1
