@@ -88,6 +88,11 @@ const approval=await call("/v1/agent-versions/"+subject.agentVersionId+"/release
 })},token);
 assert(approval.releaseApprovalStatus==="APPROVED","release approval must precede packaging");
 
+await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
+  releaseVersion:"../escape",
+  idempotencyKey:"pkg-unsafe-version-0001"
+})},token,400);
+
 const packageKey="pkg-phase6-idem-0001";
 const package1=await call("/v1/agent-versions/"+subject.agentVersionId+"/package",{method:"POST",body:JSON.stringify({
   releaseVersion:"1.0.0",idempotencyKey:packageKey
