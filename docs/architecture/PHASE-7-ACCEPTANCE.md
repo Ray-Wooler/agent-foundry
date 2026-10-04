@@ -14,8 +14,8 @@
 | P7-G9 | Security review and HTTP security controls | IMPLEMENTED |
 | P7-G10 | Disaster recovery runbook | IMPLEMENTED |
 | P7-G11 | Production Operations CI | PASS / VERIFIED — run 37137855431 |
-| P7-G12 | Production deployment to foundry.frankai.online | BLOCKED — deployment channel unavailable; authorized workstation relay offline and no Production Deploy workflow run exists |
-| P7-G13 | Production acceptance / rollback evidence | BLOCKED — depends on successful live deployment |
+| P7-G12 | Production deployment to foundry.frankai.online | PASS / DEPLOYED / OBSERVED — Hostinger shared-ingress deployment on 2026-10-04; see deployment evidence |
+| P7-G13 | Production acceptance / rollback evidence | PASS / VERIFIED — HTTPS, login, monitoring, versioned storage, isolated restore and initial-deployment ingress rollback |
 
 Phase 7 is not complete until both the repository operations gate and live deployment/acceptance gates pass.
 
@@ -39,3 +39,11 @@ Repository evidence on head `ec8b4b90af5cb73d0429438bc53d1250de3fb14f`:
 - all inherited governance checks are green on the same head.
 
 Live deployment remains a separate unverified gate. No Production Deploy workflow run exists at this point, the authorized Remote Desktop Commander device is offline, and the public hostname could not be confirmed reachable from the current session.
+
+
+## Live deployment evidence — 4 October 2026
+
+The earlier relay-offline statements above describe the historical repository
+checkpoint. Live deployment is now observed. See
+[deployment acceptance](../operations/DEPLOYMENT-2026-10-04.md) for evidence,
+release lineage and remaining OpenAI/registration/off-site scheduling limits.
