@@ -21,10 +21,14 @@ services:
     secrets: [object_storage_access_key, object_storage_secret_key]
     volumes: ["object-data:/data"]
     ports: ["127.0.0.1:4522:9000"]
-    networks: [backend]
+    networks: [backend,operator]
   grafana:
+    networks: [backend,operator]
     ports: ["127.0.0.1:4523:3000"]
   prometheus:
+    networks: [backend,operator]
     ports: ["127.0.0.1:4524:9090"]
+networks:
+  operator:
 volumes:
   object-data:
