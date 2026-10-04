@@ -359,7 +359,7 @@ q("certificationButton").onclick=async()=>{
   if(!currentEvaluationPlanId)return;
   q("evaluationError").textContent="";
   try{
-    const evidence=q("certificationEvidence").value.split("\n").map(x=>x.trim()).filter(Boolean);
+    const evidence=q("certificationEvidence").value.split("\\n").map(x=>x.trim()).filter(Boolean);
     const data=await api("/v1/evaluation-plans/"+currentEvaluationPlanId+"/certification",{
       method:"POST",
       body:JSON.stringify({
