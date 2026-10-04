@@ -39,3 +39,14 @@ Repository evidence on head `ec8b4b90af5cb73d0429438bc53d1250de3fb14f`:
 - all inherited governance checks are green on the same head.
 
 Live deployment remains a separate unverified gate. No Production Deploy workflow run exists at this point, the authorized Remote Desktop Commander device is offline, and the public hostname could not be confirmed reachable from the current session.
+
+
+## Production Review Remediations
+
+The following P1 production-review findings are addressed in the Phase 7 branch and require exact-head CI confirmation:
+
+- expired `RUNNING` operational jobs are reclaimed through a bounded lease and dead-lettered when attempts are exhausted;
+- host-invoked backup loads `DATABASE_URL_FILE`, `OBJECT_STORAGE_ACCESS_KEY_FILE`, and `OBJECT_STORAGE_SECRET_KEY_FILE` before database/object export;
+- release versions are restricted to safe object-key segments before S3-key construction;
+- object-storage export independently rejects `.`, `..`, empty, backslash, and destination-escaping key segments;
+- regression coverage exercises expired-lease reclamation, file-mounted backup credentials, and traversal-style release-version rejection.
