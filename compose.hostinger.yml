@@ -1,0 +1,30 @@
+# Overlay for the Hostinger VPS's existing host-managed Caddy.
+# docker compose -f compose.production.yml -f compose.hostinger.yml ...
+services:
+  api:
+    image: agent-foundry:${APP_VERSION:?APP_VERSION is required}
+    ports: ["127.0.0.1:4521:3001"]
+  worker:
+    image: agent-foundry:${APP_VERSION:?APP_VERSION is required}
+  web:
+    image: agent-foundry:${APP_VERSION:?APP_VERSION is required}
+    ports: ["127.0.0.1:4520:3000"]
+  caddy:
+    profiles: ["standalone-ingress"]
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/object_storage_access_key
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/object_storage_secret_key
+    secrets: [object_storage_access_key, object_storage_secret_key]
+    volumes: ["object-data:/data"]
+    ports: ["127.0.0.1:4522:9000"]
+    networks: [backend]
+  grafana:
+    ports: ["127.0.0.1:4523:3000"]
+  prometheus:
+    ports: ["127.0.0.1:4524:9090"]
+volumes:
+  object-data:

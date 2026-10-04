@@ -21,7 +21,13 @@ import { randomUUID } from "node:crypto";
 
 const pollMs = Number(process.env.WORKER_POLL_MS ?? 1000);
 const operationalLeaseSeconds = Number(process.env.OPERATIONAL_JOB_LEASE_SECONDS ?? 300);
-const engine = new PromptForgeEngine(createPromptForgeProviderFromEnvironment());
+// Initialize the model only for a transformation. Storage and operational
+// processing must remain available while model credentials are unconfigured.
+let engine: PromptForgeEngine | null = null;
+function getEngine() {
+  if (!engine) engine = new PromptForgeEngine(createPromptForgeProviderFromEnvironment());
+  return engine;
+}
 const workerId=process.env.WORKER_ID??`worker-${randomUUID()}`;
 let artifactStore:ArtifactStore|null=null;
 
@@ -77,7 +83,7 @@ async function claim(): Promise<Claimed | null> {
 
 async function processOne(item: Claimed) {
   try {
-    const built = await engine.transform({
+    const built = await getEngine().transform({
       name: item.requested_name,
       agentClass: item.requested_class,
       sourcePrompt: item.content_text,
