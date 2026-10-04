@@ -131,6 +131,18 @@ const publicationReplay=await call("/v1/release-packages/"+package1.packageRecor
 assert(publicationReplay.idempotentReplay===true,"publication same-key retry must replay");
 assert(publicationReplay.publicationRecordId===publication1.publicationRecordId,"publication replay must return same record");
 
+let legacyPublishedAt;
+if(process.env.LEGACY_PUBLICATION_PAYLOAD_TEST==="true"){
+  const {query,closeDatabase}=await import("../packages/db/dist/index.js");
+  try {
+    const row=await query("SELECT published_at::text FROM publication_records WHERE id=$1",[publication1.publicationRecordId]);
+    legacyPublishedAt=row.rows[0].published_at;
+    await query("ALTER TABLE publication_records DISABLE TRIGGER USER");
+    await query("UPDATE publication_records SET publication_payload=publication_payload-'published_at' WHERE id=$1",[publication1.publicationRecordId]);
+    await query("ALTER TABLE publication_records ENABLE TRIGGER USER");
+  } finally { await closeDatabase(); }
+}
+
 await call("/v1/release-packages/"+package1.packageRecordId+"/publish",{method:"POST",body:JSON.stringify({
   channel:"foundry-internal",idempotencyKey:`pub-phase6-conflict-${runSuffix}`
 })},token,409);
@@ -160,6 +172,7 @@ const registration1=winningRegistration.body;
 assert(registration1.frankaiRegistrationStatus==="REGISTERED","registration must succeed");
 assert(typeof registration1.registrationReference==="string"&&registration1.registrationReference.length>0,"registration reference required");
 assert(typeof registration1.requestPayload?.published_at==="string","registration must persist publication timestamp");
+if(legacyPublishedAt) assert(registration1.requestPayload.published_at===legacyPublishedAt,"legacy registration must use database publication timestamp");
 
 const registrationReplay=await call("/v1/publications/"+publication1.publicationRecordId+"/frankai-register",{method:"POST",body:JSON.stringify({
   idempotencyKey:registrationKey

@@ -170,8 +170,10 @@ export function buildPublicationPayload(input:{
 export function buildFrankAIRegistrationPayload(input:{
   publicationRecordId:string;
   publicationPayload:any;
+  publishedAt?:string;
 }) {
   const publication=input.publicationPayload;
+  const publishedAt=publication?.published_at??input.publishedAt;
   if(!publication?.agent?.registryId || !publication?.agent?.version
     || !publication?.release?.releaseId || !publication?.release?.releaseVersion
     || !/^[a-f0-9]{64}$/.test(String(publication.release.packageSha256??""))
@@ -179,7 +181,7 @@ export function buildFrankAIRegistrationPayload(input:{
     || !Array.isArray(publication.capabilities)
     || publication.evaluationRequiredOutcome!=="PASS" || publication.evaluationAggregate!=="PASS"
     || !Array.isArray(publication.evaluationRunIds) || publication.evaluationRunIds.length===0
-    || typeof publication.published_at!=="string" || Number.isNaN(Date.parse(publication.published_at))
+    || typeof publishedAt!=="string" || Number.isNaN(Date.parse(publishedAt))
     || !["VERIFIED","RESTRICTED"].includes(publication.rightsStatus)) {
     throw new Error("registration publication payload is incomplete for FrankAI contract v1.0");
   }
@@ -204,6 +206,6 @@ export function buildFrankAIRegistrationPayload(input:{
       run_ids:input.publicationPayload.evaluationRunIds,
     },
     rights_status:input.publicationPayload.rightsStatus,
-    published_at:publication.published_at,
+    published_at:publishedAt,
   };
 }

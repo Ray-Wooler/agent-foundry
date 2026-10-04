@@ -1602,9 +1602,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     if(existingForPublication.rowCount) return json(res,409,{error:"frankai_registration_already_exists"});
 
     const context=await query<{
-      agent_version_id:string;publication_payload:any;publication_status:string;workspace_id:string;registry_id:string;version:string;
+      agent_version_id:string;publication_payload:any;published_at:string;publication_status:string;workspace_id:string;registry_id:string;version:string;
     }>(
-      `SELECT rp.agent_version_id,p.publication_payload,l.publication_status,pj.workspace_id,a.registry_id,av.version
+      `SELECT rp.agent_version_id,p.publication_payload,p.published_at::text,l.publication_status,pj.workspace_id,a.registry_id,av.version
        FROM publication_records p
        JOIN release_package_records rp ON rp.id=p.release_package_record_id
        JOIN lifecycle_readiness l ON l.agent_version_id=rp.agent_version_id
@@ -1626,6 +1626,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       payload=buildFrankAIRegistrationPayload({
         publicationRecordId:publicationId,
         publicationPayload:item.publication_payload,
+        publishedAt:item.published_at,
       });
     } catch {
       return json(res,409,{error:"registration_contract_incomplete"});

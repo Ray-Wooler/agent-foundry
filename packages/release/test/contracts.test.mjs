@@ -43,6 +43,19 @@ test("registration retries reuse the immutable persisted publication timestamp",
   assert.deepEqual(second,first);
 });
 
+test("legacy publication payloads use the immutable database timestamp",()=>{
+  const legacyPayload={
+    agent:{registryId:"agent-1",version:"1.2.3"},
+    release:{releaseId:"release-1",releaseVersion:"1.2.3",packageSha256:"a".repeat(64)},
+    apsVersion:"1.5-alpha",runtimeTargets:["generic"],capabilities:[],
+    evaluationRequiredOutcome:"PASS",evaluationAggregate:"PASS",evaluationRunIds:["run-1"],
+    rightsStatus:"VERIFIED",
+  };
+  const payload=buildFrankAIRegistrationPayload({publicationRecordId:"legacy-publication",publicationPayload:legacyPayload,publishedAt});
+  assert.equal(payload.published_at,publishedAt);
+  assert.equal("published_at" in legacyPayload,false);
+});
+
 test("incomplete legacy payloads fail closed",()=>{
   assert.throws(()=>buildFrankAIRegistrationPayload({
     publicationRecordId:"legacy",
