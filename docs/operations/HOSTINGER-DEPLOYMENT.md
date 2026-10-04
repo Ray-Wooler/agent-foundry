@@ -4,7 +4,8 @@ Use compose.production.yml with compose.hostinger.yml on srv1661521.
 
 The existing host Caddy retains ports 80/443. The overlay publishes only
 loopback web/API ports 4520/4521. Operator-only storage, Grafana, and Prometheus
-use loopback 4522/4523/4524. Import ops/Caddyfile.hostinger from host Caddy
+use loopback 4522/4523/4524. They also join a dedicated operator network
+because Docker suppresses published ports on internal-only networks. Import ops/Caddyfile.hostinger from host Caddy
 after backing up and validating its existing configuration.
 
 The dedicated MinIO service uses a pinned image digest and an isolated data
@@ -14,7 +15,9 @@ Initialize the bucket with scripts/init_object_storage.mjs and explicitly enable
 bucket versioning before acceptance.
 
 File-mounted secrets remain in /etc/agent-foundry/secrets (0700 directory,
-0600 files). Generate independent database, object-storage, bootstrap and
+0600 files). The Grafana password file must be owned by container uid 472
+while retaining mode 0600; otherwise its unprivileged entrypoint cannot read it.
+Generate independent database, object-storage, bootstrap and
 Grafana credentials. Never copy another application's database or storage keys.
 
 If no owner email has been supplied, owner@foundry.frankai.online may be used as

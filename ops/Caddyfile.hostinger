@@ -1,8 +1,9 @@
 # Import this file from the existing /etc/caddy/Caddyfile.
 foundry.frankai.online {
   encode zstd gzip
-  @metrics path /api/metrics
-  respond @metrics 404
+  handle /api/metrics {
+    respond 404
+  }
   handle_path /api/* {
     reverse_proxy 127.0.0.1:4521
   }

@@ -135,7 +135,8 @@ jobs:
         run: |
           grep -q "Strict-Transport-Security" ops/Caddyfile
           grep -q "X-Frame-Options" ops/Caddyfile
-          grep -q "respond @metrics 404" ops/Caddyfile
+          grep -q "handle /api/metrics" ops/Caddyfile
+          grep -q "respond 404" ops/Caddyfile
           test -f docs/security/PHASE-7-SECURITY-REVIEW.md
           test -f docs/operations/DISASTER-RECOVERY.md
 
