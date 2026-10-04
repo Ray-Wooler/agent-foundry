@@ -69,6 +69,8 @@ jobs:
         run: pnpm typecheck
       - name: Build workspace
         run: pnpm build
+      - name: Validate served browser JavaScript
+        run: pnpm --filter @agent-foundry/web test
       - name: Validate production container build
         run: docker build -t agent-foundry:phase7-ci .
       - name: Validate production Compose
