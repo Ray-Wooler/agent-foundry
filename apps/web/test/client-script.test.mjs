@@ -71,6 +71,11 @@ test('the served page contains executable browser JavaScript', async (t) => {
   new Script("token=testSession").runInContext(context);
   await new Script('restore()').runInContext(context);
   assert.equal(cleared,false,'failed selection restore preserves authentication');
+  context.fetch=async()=>({ok:false,status:401,json:async()=>({error:'unauthorized'})});
+  await new Script('restore()').runInContext(context);
+  assert.equal(cleared,true,'authentication failure clears an expired session');
+  assert.equal(elements.get('sessionBadge').textContent,'Signed out');
+
 
   for (const [index, match] of scripts.entries()) {
     assert.doesNotThrow(() => new Script(match[1], { filename: 'served-client-' + index + '.js' }));

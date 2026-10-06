@@ -186,12 +186,22 @@ let currentPublicationRecordId=null;
 let nextSubmissionOffset=null;
 let selectionGeneration=0;
 const q=(id)=>document.getElementById(id);
+function clearSession(){
+  token=null;sessionStorage.removeItem("foundry_token");selectionGeneration++;
+  currentTransformationId=currentEvaluationPlanId=currentHumanExecutionId=currentAgentVersionId=currentPackageRecordId=currentPublicationRecordId=null;
+  q("loginCard").classList.remove("hidden");
+  for(const id of ["intakeCard","submissionsCard","statusCard"])q(id).classList.add("hidden");
+  q("sessionBadge").textContent="Signed out";
+}
 async function api(path,options={}){
   const headers={"content-type":"application/json",...(options.headers||{})};
   if(token) headers.authorization="Bearer "+token;
   const res=await fetch(API+path,{...options,headers});
   const body=await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(body.error||("HTTP "+res.status));
+  if(!res.ok){
+    if(res.status===401 && token){clearSession();q("loginError").textContent="Session expired. Please sign in again.";}
+    throw new Error(body.error||("HTTP "+res.status));
+  }
   return body;
 }
 function showApp(data){
@@ -207,7 +217,7 @@ async function restore(){
   if(!token)return;
   try{showApp(await api("/v1/me"));}
   catch(e){
-    if(["unauthorized","invalid_credentials"].includes(e.message)){token=null;sessionStorage.removeItem("foundry_token");}
+    if(["unauthorized","invalid_credentials"].includes(e.message)){clearSession();}
     q("loginError").textContent=e.message;return;
   }
   try{await restoreSelection();}catch(e){q("submissionsError").textContent=e.message;}
