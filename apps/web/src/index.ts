@@ -321,10 +321,12 @@ async function pollEvaluationPlan(id){
   }
 }
 q("createEvaluationPlanButton").onclick=async()=>{
+  const generation=selectionGeneration;
   if(!currentTransformationId)return;
   q("evaluationError").textContent="";
   try{
     const data=await api("/v1/transformations/"+currentTransformationId+"/evaluation-plan",{method:"POST",body:"{}"});
+    if(generation!==selectionGeneration)return;
     q("createEvaluationPlanButton").classList.add("hidden");
     await pollEvaluationPlan(data.planId);
   }catch(e){q("evaluationError").textContent=e.message;}
@@ -401,6 +403,7 @@ async function refreshAuthorityState(){
   }catch(e){q("evaluationError").textContent=e.message;}
 }
 q("certificationButton").onclick=async()=>{
+  const generation=selectionGeneration;
   if(!currentEvaluationPlanId)return;
   q("evaluationError").textContent="";
   try{
@@ -413,6 +416,7 @@ q("certificationButton").onclick=async()=>{
         evidence
       })
     });
+    if(generation!==selectionGeneration)return;
     currentAgentVersionId=data.agentVersionId;
     await refreshAuthorityState();
     await pollEvaluationPlan(currentEvaluationPlanId);
@@ -499,10 +503,12 @@ q("reviewButton").onclick=async()=>{
   }catch(e){q("reviewError").textContent=e.message;}
 };
 q("revisionButton").onclick=async()=>{
+  const generation=selectionGeneration;
   if(!currentTransformationId)return;
   q("reviewError").textContent="";
   try{
     const data=await api("/v1/transformations/"+currentTransformationId+"/revisions",{method:"POST",body:"{}"});
+    if(generation!==selectionGeneration)return;
     await openSubmission(data.transformationId);
     q("reviewRationale").value="";
     q("requestedChanges").value="";
