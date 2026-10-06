@@ -203,7 +203,15 @@ function showApp(data){
     const o=document.createElement("option");o.value=p.id;o.textContent=ws.name+" / "+p.name;select.appendChild(o);
   }
 }
-async function restore(){if(!token)return;try{showApp(await api("/v1/me"));await restoreSelection();}catch{token=null;sessionStorage.removeItem("foundry_token");}}
+async function restore(){
+  if(!token)return;
+  try{showApp(await api("/v1/me"));}
+  catch(e){
+    if(["unauthorized","invalid_credentials"].includes(e.message)){token=null;sessionStorage.removeItem("foundry_token");}
+    q("loginError").textContent=e.message;return;
+  }
+  try{await restoreSelection();}catch(e){q("submissionsError").textContent=e.message;}
+}
 q("loginButton").onclick=async()=>{q("loginError").textContent="";try{
   const data=await api("/v1/auth/login",{method:"POST",body:JSON.stringify({email:q("email").value,password:q("password").value})});
   token=data.token;sessionStorage.setItem("foundry_token",token);showApp(data);await restoreSelection();
@@ -257,6 +265,7 @@ async function poll(id){
     renderLineage(data.revisionLineage||[]);
     if(!["QUEUED","PROCESSING"].includes(data.status)) {
       await loadSubmissions();
+      if(generation!==selectionGeneration)return;
       if(data.evaluationPlanId) await pollEvaluationPlan(data.evaluationPlanId);
       else q("evaluationState").textContent="No evaluation plan.";
       if(generation!==selectionGeneration)return;
