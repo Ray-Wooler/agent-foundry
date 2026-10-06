@@ -1830,6 +1830,29 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/v1/transformations") {
+    const projectId = url.searchParams.get("projectId");
+    if (projectId && !/^[0-9a-f-]{36}$/i.test(projectId)) return json(res,400,{error:"invalid_project_id"});
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    if (!Number.isSafeInteger(offset) || offset < 0) return json(res,400,{error:"invalid_offset"});
+    const result = await query(
+      `SELECT t.id,t.requested_name,t.status,t.created_at::text,t.project_id,
+              p.name project_name,a.registry_id,av.version,av.status agent_version_status,
+              l.semantic_approval_status,l.evaluation_status,l.certification_status,
+              (SELECT parent_transformation_id FROM candidate_revision_lineage WHERE child_transformation_id=t.id) parent_transformation_id
+       FROM promptforge_transformations t
+       JOIN projects p ON p.id=t.project_id
+       JOIN workspace_memberships m ON m.workspace_id=p.workspace_id AND m.user_id=$1
+       LEFT JOIN agent_versions av ON av.id=t.agent_version_id
+       LEFT JOIN agents a ON a.id=av.agent_id
+       LEFT JOIN lifecycle_readiness l ON l.agent_version_id=av.id
+       WHERE ($2::uuid IS NULL OR t.project_id=$2::uuid)
+       ORDER BY t.created_at DESC,t.id DESC LIMIT 101 OFFSET $3`,
+      [user.id,projectId,offset],
+    );
+    return json(res,200,{submissions:result.rows.slice(0,100),nextOffset:result.rows.length>100?offset+100:null});
+  }
+
   const transformationMatch = /^\/v1\/transformations\/([0-9a-f-]+)$/.exec(url.pathname);
   if (req.method === "GET" && transformationMatch) {
     const transformationId = transformationMatch[1]!;
@@ -1910,7 +1933,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
        ORDER BY created_at`,
       [transformationId],
     );
+    const evaluationPlan = item.agent_version_id ? await query<{id:string}>(
+      "SELECT id FROM evaluation_plans WHERE agent_version_id=$1 ORDER BY created_at DESC LIMIT 1",
+      [item.agent_version_id],
+    ) : null;
     return json(res, 200, {
+      agentVersionId: item.agent_version_id,
+      evaluationPlanId: evaluationPlan?.rows[0]?.id ?? null,
       id: item.id,
       status: item.status,
       requestedName: item.requested_name,
