@@ -1831,8 +1831,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (req.method === "GET" && url.pathname === "/v1/transformations") {
-    const projectId = url.searchParams.get("projectId");
-    if (projectId && !/^[0-9a-f-]{36}$/i.test(projectId)) return json(res,400,{error:"invalid_project_id"});
+    const projectId = url.searchParams.get("projectId") || null;
+    if (projectId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(projectId)) return json(res,400,{error:"invalid_project_id"});
     const offset = Number(url.searchParams.get("offset") ?? 0);
     if (!Number.isSafeInteger(offset) || offset < 0) return json(res,400,{error:"invalid_offset"});
     const result = await query(

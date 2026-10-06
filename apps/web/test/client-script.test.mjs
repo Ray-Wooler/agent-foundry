@@ -52,6 +52,31 @@ test('the served page contains executable browser JavaScript', async (t) => {
   assert.equal(elements.get('reviewButton').disabled,false);
   assert.equal(elements.get('submissionsList').children.length,1);
   assert.equal(elements.get('evaluationState').textContent,'No evaluation plan.');
+  let releases;
+  let evalFetches=0;
+  context.fetch=async url=>({ok:true,json:async()=>{
+    if(url.includes('?offset='))return new Promise(resolve=>{releases=()=>resolve({submissions:[],nextOffset:null});});
+    if(url.includes('/evaluation-plans/')){evalFetches++;return {};}
+    return {status:'REQUIRES_REVIEW',candidate:{},stages:[],revisionLineage:[],evaluationPlanId:'old-plan'};
+  }});
+  const pending=new Script('openSubmission("'+first+'")').runInContext(context);
+  while(!releases)await new Promise(resolve=>setImmediate(resolve));
+  new Script('selectionGeneration++;currentTransformationId="'+second+'"').runInContext(context);
+  releases();await pending;
+  assert.equal(evalFetches,0,'superseded selection must not start evaluation polling');
+  let cleared=false;
+  context.sessionStorage.removeItem=()=>{cleared=true;};
+  context.fetch=async url=>({ok:!url.includes('/transformations/'),json:async()=>url.endsWith('/v1/me')?{user:{email:'owner@example.com'},workspaces:[]}:url.includes('?offset=')?{submissions:[],nextOffset:null}:{error:'not_found'}});
+  context.testSession="test-fixture-session";
+  new Script("token=testSession").runInContext(context);
+  await new Script('restore()').runInContext(context);
+  assert.equal(cleared,false,'failed selection restore preserves authentication');
+  context.fetch=async()=>({ok:false,status:401,json:async()=>({error:'unauthorized'})});
+  await new Script('restore()').runInContext(context);
+  assert.equal(cleared,true,'authentication failure clears an expired session');
+  assert.equal(elements.get('sessionBadge').textContent,'Signed out');
+
+
   for (const [index, match] of scripts.entries()) {
     assert.doesNotThrow(() => new Script(match[1], { filename: 'served-client-' + index + '.js' }));
   }

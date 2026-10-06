@@ -186,12 +186,22 @@ let currentPublicationRecordId=null;
 let nextSubmissionOffset=null;
 let selectionGeneration=0;
 const q=(id)=>document.getElementById(id);
+function clearSession(){
+  token=null;sessionStorage.removeItem("foundry_token");selectionGeneration++;
+  currentTransformationId=currentEvaluationPlanId=currentHumanExecutionId=currentAgentVersionId=currentPackageRecordId=currentPublicationRecordId=null;
+  q("loginCard").classList.remove("hidden");
+  for(const id of ["intakeCard","submissionsCard","statusCard"])q(id).classList.add("hidden");
+  q("sessionBadge").textContent="Signed out";
+}
 async function api(path,options={}){
   const headers={"content-type":"application/json",...(options.headers||{})};
   if(token) headers.authorization="Bearer "+token;
   const res=await fetch(API+path,{...options,headers});
   const body=await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(body.error||("HTTP "+res.status));
+  if(!res.ok){
+    if(res.status===401 && token){clearSession();q("loginError").textContent="Session expired. Please sign in again.";}
+    throw new Error(body.error||("HTTP "+res.status));
+  }
   return body;
 }
 function showApp(data){
@@ -203,7 +213,15 @@ function showApp(data){
     const o=document.createElement("option");o.value=p.id;o.textContent=ws.name+" / "+p.name;select.appendChild(o);
   }
 }
-async function restore(){if(!token)return;try{showApp(await api("/v1/me"));await restoreSelection();}catch{token=null;sessionStorage.removeItem("foundry_token");}}
+async function restore(){
+  if(!token)return;
+  try{showApp(await api("/v1/me"));}
+  catch(e){
+    if(["unauthorized","invalid_credentials"].includes(e.message)){clearSession();}
+    q("loginError").textContent=e.message;return;
+  }
+  try{await restoreSelection();}catch(e){q("submissionsError").textContent=e.message;}
+}
 q("loginButton").onclick=async()=>{q("loginError").textContent="";try{
   const data=await api("/v1/auth/login",{method:"POST",body:JSON.stringify({email:q("email").value,password:q("password").value})});
   token=data.token;sessionStorage.setItem("foundry_token",token);showApp(data);await restoreSelection();
@@ -257,6 +275,7 @@ async function poll(id){
     renderLineage(data.revisionLineage||[]);
     if(!["QUEUED","PROCESSING"].includes(data.status)) {
       await loadSubmissions();
+      if(generation!==selectionGeneration)return;
       if(data.evaluationPlanId) await pollEvaluationPlan(data.evaluationPlanId);
       else q("evaluationState").textContent="No evaluation plan.";
       if(generation!==selectionGeneration)return;
@@ -302,10 +321,12 @@ async function pollEvaluationPlan(id){
   }
 }
 q("createEvaluationPlanButton").onclick=async()=>{
+  const generation=selectionGeneration;
   if(!currentTransformationId)return;
   q("evaluationError").textContent="";
   try{
     const data=await api("/v1/transformations/"+currentTransformationId+"/evaluation-plan",{method:"POST",body:"{}"});
+    if(generation!==selectionGeneration)return;
     q("createEvaluationPlanButton").classList.add("hidden");
     await pollEvaluationPlan(data.planId);
   }catch(e){q("evaluationError").textContent=e.message;}
@@ -382,6 +403,7 @@ async function refreshAuthorityState(){
   }catch(e){q("evaluationError").textContent=e.message;}
 }
 q("certificationButton").onclick=async()=>{
+  const generation=selectionGeneration;
   if(!currentEvaluationPlanId)return;
   q("evaluationError").textContent="";
   try{
@@ -394,6 +416,7 @@ q("certificationButton").onclick=async()=>{
         evidence
       })
     });
+    if(generation!==selectionGeneration)return;
     currentAgentVersionId=data.agentVersionId;
     await refreshAuthorityState();
     await pollEvaluationPlan(currentEvaluationPlanId);
@@ -480,10 +503,12 @@ q("reviewButton").onclick=async()=>{
   }catch(e){q("reviewError").textContent=e.message;}
 };
 q("revisionButton").onclick=async()=>{
+  const generation=selectionGeneration;
   if(!currentTransformationId)return;
   q("reviewError").textContent="";
   try{
     const data=await api("/v1/transformations/"+currentTransformationId+"/revisions",{method:"POST",body:"{}"});
+    if(generation!==selectionGeneration)return;
     await openSubmission(data.transformationId);
     q("reviewRationale").value="";
     q("requestedChanges").value="";
