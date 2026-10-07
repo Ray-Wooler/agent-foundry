@@ -24,7 +24,10 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-validation.txt
       - name: Validate positive APS fixtures
-        run: python scripts/validate_aps.py tests/fixtures/aps/1.5-alpha/minimal-valid.json
+        run: |
+          python scripts/validate_aps.py \
+            tests/fixtures/aps/1.5-alpha/minimal-valid.json \
+            tests/fixtures/aps/1.5-alpha/contextual-authority-valid.json
       - name: Assert invalid fixtures fail
         shell: bash
         run: |
