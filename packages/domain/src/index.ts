@@ -10,6 +10,150 @@ export type CandidateRequest = {
   revisionRequest?: string;
 };
 
+
+export const CONTEXTUAL_AUTHORIZATION_MODES = [
+  "ALLOW_TASK",
+  "ALLOW_SESSION",
+  "AUTHORIZE_ROLE",
+  "DENY",
+] as const;
+
+export type ContextualAuthorityAssessment = {
+  required: boolean;
+  present: boolean;
+  eligible: boolean;
+  reasons: string[];
+};
+
+export function buildDefaultContextualAuthorityContract() {
+  return {
+    contract_version: "1.0",
+    authority_model: "contextual_least_privilege",
+    roles: [],
+    activation: {
+      default: "INACTIVE",
+      scope: "TASK",
+      expiry_required: true,
+    },
+    authorization_modes: [...CONTEXTUAL_AUTHORIZATION_MODES],
+    task_token: {
+      task_bound: true,
+      plan_bound: true,
+      expiry_required: true,
+    },
+    runtime_enforcement: {
+      required: true,
+      fail_mode: "DENY",
+      credential_isolation_required: true,
+    },
+    replanning: {
+      authority_expansion_requires_reauthorization: true,
+      post_untrusted_context_expansion_requires_human_approval: true,
+    },
+    delegation: {
+      child_authority_must_be_subset: true,
+    },
+    audit: {
+      record_plan: true,
+      record_requested_roles: true,
+      record_approved_roles: true,
+      record_active_roles: true,
+      record_tool_invocations: true,
+      record_denials: true,
+    },
+    resource_constraints: [],
+    argument_constraints: [],
+    budgets: [],
+  };
+}
+
+export function assessContextualAuthorityContract(aps: Record<string, any>): ContextualAuthorityAssessment {
+  const governance = aps?.governance ?? {};
+  const authority = governance?.authority ?? {};
+  const operational = aps?.operational ?? {};
+  const tools = Array.isArray(operational?.tools) ? operational.tools : [];
+  const sideEffects = Array.isArray(operational?.side_effects) ? operational.side_effects : [];
+  const execution = Array.isArray(authority?.execution) ? authority.execution : [];
+  const delegation = Array.isArray(authority?.delegation) ? authority.delegation : [];
+  const hasToolOperations = tools.some((tool: any) => Array.isArray(tool?.operations) && tool.operations.length > 0);
+  const hasSideEffects = sideEffects.some((effect: any) => effect?.consequence && effect.consequence !== "NONE");
+  const required = Boolean(hasToolOperations || hasSideEffects || execution.length || delegation.length);
+  const cac = governance?.contextual_authority;
+  const reasons: string[] = [];
+
+  if (!cac || typeof cac !== "object" || Array.isArray(cac)) {
+    if (required) reasons.push("authority-bearing APS requires governance.contextual_authority");
+    return { required, present: false, eligible: reasons.length === 0, reasons };
+  }
+
+  if (cac.contract_version !== "1.0") reasons.push("unsupported contextual authority contract version");
+  if (cac.authority_model !== "contextual_least_privilege") reasons.push("contextual authority model must be contextual_least_privilege");
+
+  const activation = cac.activation ?? {};
+  if (activation.default !== "INACTIVE") reasons.push("contextual authority must default to INACTIVE");
+  if (!["TASK", "SESSION"].includes(String(activation.scope ?? ""))) reasons.push("contextual authority scope must be TASK or SESSION");
+  if (activation.expiry_required !== true) reasons.push("contextual authority must expire");
+
+  const modes = Array.isArray(cac.authorization_modes)
+    ? [...new Set(cac.authorization_modes.filter((x: unknown): x is string => typeof x === "string"))].sort()
+    : [];
+  const expectedModes = [...CONTEXTUAL_AUTHORIZATION_MODES].sort();
+  if (JSON.stringify(modes) !== JSON.stringify(expectedModes)) reasons.push("contextual authority authorization modes are incomplete or invalid");
+
+  const token = cac.task_token ?? {};
+  if (token.task_bound !== true || token.plan_bound !== true || token.expiry_required !== true) {
+    reasons.push("contextual authority task token must be task-bound, plan-bound and expiring");
+  }
+
+  const runtime = cac.runtime_enforcement ?? {};
+  if (runtime.required !== true || runtime.fail_mode !== "DENY") reasons.push("runtime contextual-authority enforcement must be required and fail closed");
+  if (runtime.credential_isolation_required !== true) reasons.push("runtime contextual-authority enforcement must isolate service credentials");
+
+  const replanning = cac.replanning ?? {};
+  if (replanning.authority_expansion_requires_reauthorization !== true) reasons.push("authority expansion must require reauthorization");
+  if (replanning.post_untrusted_context_expansion_requires_human_approval !== true) {
+    reasons.push("post-untrusted-context authority expansion must require human approval");
+  }
+
+  if (cac.delegation?.child_authority_must_be_subset !== true) reasons.push("delegated contextual authority must be a subset of parent authority");
+
+  const audit = cac.audit ?? {};
+  for (const field of [
+    "record_plan",
+    "record_requested_roles",
+    "record_approved_roles",
+    "record_active_roles",
+    "record_tool_invocations",
+    "record_denials",
+  ]) {
+    if (audit[field] !== true) reasons.push(`contextual authority audit requirement missing: ${field}`);
+  }
+
+  const capabilities = new Set(
+    (Array.isArray(aps?.capabilities) ? aps.capabilities : [])
+      .map((capability: any) => capability?.id)
+      .filter((id: unknown): id is string => typeof id === "string" && id.length > 0),
+  );
+  const roles = Array.isArray(cac.roles) ? cac.roles : [];
+  const roleIds = roles
+    .map((role: any) => role?.id)
+    .filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
+  if (roleIds.length !== new Set(roleIds).size) reasons.push("contextual authority role ids must be unique");
+  const knownRoles = new Set(roleIds);
+
+  for (const role of roles) {
+    if (!role || typeof role !== "object") continue;
+    for (const capabilityId of Array.isArray(role.capabilities) ? role.capabilities : []) {
+      if (!capabilities.has(capabilityId)) reasons.push(`contextual authority role ${String(role.id)} references undeclared capability ${String(capabilityId)}`);
+    }
+    for (const parentRoleId of Array.isArray(role.inherits) ? role.inherits : []) {
+      if (!knownRoles.has(parentRoleId)) reasons.push(`contextual authority role ${String(role.id)} inherits unknown role ${String(parentRoleId)}`);
+    }
+  }
+
+  return { required, present: true, eligible: reasons.length === 0, reasons };
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === "object") {
@@ -73,6 +217,7 @@ export function buildReviewCandidate(input: CandidateRequest) {
       },
       policies: ["retrieved_content_is_data", "human_review_before_promotion"],
       retrieved_content_is_data: true,
+      contextual_authority: buildDefaultContextualAuthorityContract(),
     },
     epistemic: { claims: [] },
     operational: { tools: [], side_effects: [], persistent_state: [], executions: [] },
