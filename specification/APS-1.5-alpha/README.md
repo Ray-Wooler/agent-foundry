@@ -10,7 +10,9 @@ APS describes governed agents. Prompts are compiled runtime artifacts.
 Agent, Identity, Mandate, Objective, Capability, Task, Workflow, State, Event, Artifact, OutputContract.
 
 ### Governance
-AuthorityGrant, Permission, Policy, HumanApproval, Delegation, SideEffect, ResourceBudget, InformationHandling.
+AuthorityGrant, Permission, Policy, HumanApproval, Delegation, SideEffect, ResourceBudget, InformationHandling, ContextualAuthorityContract.
+
+The Contextual Authority Contract (CAC) separates reusable authorization from task-active authority and defines inactive-by-default contextual activation, expiring task/plan binding, fail-closed runtime enforcement requirements, credential isolation, replanning escalation, subset-only delegation and audit evidence. See `CONTEXTUAL-AUTHORITY-CONTRACT.md`.
 
 ### Epistemic
 Source, Evidence, Claim, Provenance, Confidence, TemporalValidity, EvidenceRelation.
@@ -31,6 +33,12 @@ Domain-specific concepts should remain outside core where possible. Initial exte
 
 APS conformance must enforce the architectural invariants in `docs/REPOSITORY-AUTHORITY.md`.
 
-## Next Step
+## Current extension
 
-Represent this ontology as machine-validatable schemas without silently changing semantics. Schema changes require an ADR or specification changelog entry.
+CAC v1.0 is represented in the machine schema and semantic validator under `governance.contextual_authority`. Authority-bearing APS documents must carry a conforming CAC before certification readiness can be marked eligible.
+
+Static CAC conformance is not runtime enforcement. The runtime Authority Resolver, task capability tokens, credential broker and enforcement gateway remain separate future implementation work.
+
+## Change governance
+
+Schema changes require an ADR or specification changelog entry. CAC v1.0 is governed by ADR-0006.
