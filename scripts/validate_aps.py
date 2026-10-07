@@ -121,6 +121,8 @@ def semantic(doc):
             if isinstance(cap,dict) and isinstance(cap.get("id"),str)
         }
         roles=cac.get("roles",[])
+        if contextual_authority_required and not roles:
+            errs.append("INV-021: authority-bearing APS requires at least one contextual role")
         role_ids=[r.get("id") for r in roles if isinstance(r,dict)]
         if len(role_ids)!=len(set(role_ids)):
             errs.append("INV-021: contextual authority role ids must be unique")
