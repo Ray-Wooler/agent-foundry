@@ -15,9 +15,14 @@ test('capability contracts survive extraction, stage evidence and APS mapping wi
  assert.deepEqual(result.apsDocument.governance.authority.execution,[]);
  assert.deepEqual(result.apsDocument.governance.authority.delegation,[]);
  assert.deepEqual(result.apsDocument.operational.tools,[]);
- assert.equal(result.apsDocument.extensions.promptforge.engine_version,'promptforge-2.1');
+ assert.ok(result.apsDocument.sufficiency.answerability_policy.required_information.includes('Scoped human authorization'));
+ assert.equal(result.apsDocument.sufficiency.answerability_policy.clarification.question_selection,'Ask for the highest-consequence unresolved requirement first.');
+ assert.equal(result.apsDocument.sufficiency.pre_execution_consolidation.required,true);
+ assert.equal(result.apsDocument.sufficiency.pre_execution_consolidation.fail_closed,true);
+ assert.equal(result.apsDocument.extensions.promptforge.engine_version,'promptforge-2.2');
  assert.ok(result.apsDocument.extensions.promptforge.revision_request_sha256);
  assert.equal(result.reviewPackage.validation.status,'PASS');
+ assert.equal(result.reviewPackage.validation.checks.find(x=>x.id==='PF2-010').passed,true);
 });
 for(const field of ['preconditions','evidenceRequirements'])for(const value of [undefined,[],[''],['valid',42],'not-an-array'])test('rejects invalid '+field+' '+JSON.stringify(value),async()=>{
  await assert.rejects(new PromptForgeEngine(provider({capabilities:[{...capability,[field]:value}]})).transform(input),/requires non-empty/);

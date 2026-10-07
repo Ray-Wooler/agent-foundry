@@ -12,8 +12,11 @@ Agent, Identity, Mandate, Objective, Capability, Task, Workflow, State, Event, A
 ### Governance
 AuthorityGrant, Permission, Policy, HumanApproval, Delegation, SideEffect, ResourceBudget, InformationHandling.
 
+### Sufficiency
+AnswerabilityPolicy, ClarificationPolicy, ConsolidationPolicy, MissingInformationState, PreExecutionConsolidation.
+
 ### Epistemic
-Source, Evidence, Claim, Provenance, Confidence, TemporalValidity, EvidenceRelation.
+Source, Evidence, Claim, Provenance, Confidence, TemporalValidity, EvidenceRelation. Confidence is evidence metadata, not a substitute for answerability or authority.
 
 ### Operational
 Tool, Environment, DeploymentProfile, Execution, ExecutionEvidence, ReleaseGate, RollbackPolicy, AuditRecord, Handoff.

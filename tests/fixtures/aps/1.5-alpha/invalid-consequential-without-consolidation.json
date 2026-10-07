@@ -50,9 +50,15 @@
       "state_taxonomy": ["MISSING_USER_INFORMATION","MISSING_EVIDENCE","EPISTEMIC_UNKNOWN","READY_TO_ANSWER","INSUFFICIENT_AUTHORITY"]
     },
     "pre_execution_consolidation": {
-      "required": true,
+      "required": false,
       "fail_closed": true,
       "include": ["objective","known constraints","evidence","assumptions","missing requirements","authority state"]
     }
+  },
+  "operational": {
+    "tools": [],
+    "side_effects": [{"id":"external-mutation","consequence":"HIGH","authority_grant":"grant:external-mutation"}],
+    "persistent_state": [],
+    "executions": []
   }
 }

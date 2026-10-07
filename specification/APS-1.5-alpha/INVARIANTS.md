@@ -17,6 +17,10 @@
 | INV-013 | Consequential side effects require applicable authority | Semantic: HIGH/CRITICAL side effects require authority_grant. |
 | INV-014 | Claims of execution require execution evidence | Semantic: IMPLEMENTED/TESTED/VERIFIED/DEPLOYED/OBSERVED execution states require evidence. |
 | INV-015 | Claims of verification require verification evidence | Semantic: VERIFIED/OBSERVED require verification_evidence. |
+| INV-016 | Answerability does not imply actionability or authority | Structural/semantic: sufficiency is separate from governance authority; READY_TO_ANSWER cannot grant execution or delegation authority. |
+| INV-017 | Consequential execution requires pre-execution consolidation | Semantic/runtime: when a sufficiency contract is declared for consequential work, pre_execution_consolidation must be required and fail closed. |
+| INV-018 | Clarification must be tied to explicit missing requirements | Schema/semantic: answerability policy declares required information and a targeted clarification policy rather than a generic confidence threshold. |
+| INV-019 | Model confidence cannot substitute for typed sufficiency state | Architectural: confidence may inform review but cannot alone establish READY_TO_ANSWER or READY_TO_ACT. |
 
 ## Enforcement Classes
 

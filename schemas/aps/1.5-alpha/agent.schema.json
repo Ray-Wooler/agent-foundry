@@ -111,6 +111,19 @@
         }
       }
     },
+    "sufficiency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answerability_policy", "pre_execution_consolidation"],
+      "properties": {
+        "answerability_policy": {
+          "$ref": "common.schema.json#/$defs/answerabilityPolicy"
+        },
+        "pre_execution_consolidation": {
+          "$ref": "common.schema.json#/$defs/preExecutionConsolidation"
+        }
+      }
+    },
     "epistemic": {
       "type": "object",
       "additionalProperties": false,
