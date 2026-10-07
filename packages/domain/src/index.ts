@@ -135,6 +135,7 @@ export function assessContextualAuthorityContract(aps: Record<string, any>): Con
       .filter((id: unknown): id is string => typeof id === "string" && id.length > 0),
   );
   const roles = Array.isArray(cac.roles) ? cac.roles : [];
+  if (required && roles.length === 0) reasons.push("authority-bearing APS requires at least one contextual role");
   const roleIds = roles
     .map((role: any) => role?.id)
     .filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
