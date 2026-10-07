@@ -1,0 +1,144 @@
+{
+  "aps_version": "1.5-alpha",
+  "agent": {
+    "id": "cac-cyclic-roles",
+    "name": "CAC Cyclic Roles",
+    "version": "0.0.1",
+    "class": "specialist",
+    "description": "Contextual authority conformance fixture."
+  },
+  "mandate": {
+    "purpose": "Exercise Contextual Authority Contract conformance.",
+    "primary_objective": "Validate contextual least-privilege specification.",
+    "secondary_objectives": [],
+    "non_goals": []
+  },
+  "capabilities": [
+    {
+      "id": "inspect",
+      "description": "Inspect supplied data.",
+      "inputs": [
+        "data"
+      ],
+      "outputs": [
+        "assessment"
+      ],
+      "preconditions": [
+        "data is supplied"
+      ],
+      "required_permissions": [
+        "data.read"
+      ],
+      "side_effect_classes": [],
+      "evidence_requirements": [
+        "source data"
+      ],
+      "acceptance_criteria": [
+        "assessment returned"
+      ]
+    }
+  ],
+  "governance": {
+    "authority": {
+      "recommendation": [
+        "assess"
+      ],
+      "execution": [
+        "inspect_data"
+      ],
+      "delegation": [],
+      "approval_required": [],
+      "prohibited": [
+        "fabricate_execution"
+      ]
+    },
+    "policies": [
+      "least_privilege"
+    ],
+    "retrieved_content_is_data": true,
+    "contextual_authority": {
+      "contract_version": "1.0",
+      "authority_model": "contextual_least_privilege",
+      "roles": [
+        {
+          "id": "reader",
+          "description": "Reader role.",
+          "capabilities": [
+            "inspect"
+          ],
+          "inherits": [
+            "reviewer"
+          ]
+        },
+        {
+          "id": "reviewer",
+          "description": "Reviewer role.",
+          "capabilities": [
+            "inspect"
+          ],
+          "inherits": [
+            "reader"
+          ]
+        }
+      ],
+      "activation": {
+        "default": "INACTIVE",
+        "scope": "TASK",
+        "expiry_required": true
+      },
+      "authorization_modes": [
+        "ALLOW_TASK",
+        "ALLOW_SESSION",
+        "AUTHORIZE_ROLE",
+        "DENY"
+      ],
+      "task_token": {
+        "task_bound": true,
+        "plan_bound": true,
+        "expiry_required": true
+      },
+      "runtime_enforcement": {
+        "required": true,
+        "fail_mode": "DENY",
+        "credential_isolation_required": true
+      },
+      "replanning": {
+        "authority_expansion_requires_reauthorization": true,
+        "post_untrusted_context_expansion_requires_human_approval": true
+      },
+      "delegation": {
+        "child_authority_must_be_subset": true
+      },
+      "audit": {
+        "record_plan": true,
+        "record_requested_roles": true,
+        "record_approved_roles": true,
+        "record_active_roles": true,
+        "record_tool_invocations": true,
+        "record_denials": true
+      },
+      "resource_constraints": [
+        "resource must match the approved task scope"
+      ],
+      "argument_constraints": [],
+      "budgets": []
+    }
+  },
+  "operational": {
+    "tools": [
+      {
+        "id": "data-service",
+        "operations": [
+          {
+            "name": "read",
+            "permission": "data.read",
+            "authority": "inspect_data"
+          }
+        ]
+      }
+    ],
+    "side_effects": [],
+    "persistent_state": [],
+    "executions": []
+  }
+}

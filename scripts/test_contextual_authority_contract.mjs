@@ -67,6 +67,14 @@ invalidExpansion.governance.contextual_authority.replanning.post_untrusted_conte
 assessment = assessContextualAuthorityContract(invalidExpansion);
 assert(!assessment.eligible, "post-untrusted authority expansion without human approval must be ineligible");
 
+const cyclic = structuredClone(valid);
+cyclic.governance.contextual_authority.roles = [
+  { id: "reader", capabilities: ["inspect"], inherits: ["reviewer"] },
+  { id: "reviewer", capabilities: ["inspect"], inherits: ["reader"] },
+];
+assessment = assessContextualAuthorityContract(cyclic);
+assert(!assessment.eligible, "cyclic contextual role inheritance must be ineligible");
+
 console.log(JSON.stringify({
   status: "PASS",
   cases: [
@@ -75,6 +83,7 @@ console.log(JSON.stringify({
     "authority-bearing empty roles",
     "valid authority-bearing CAC",
     "undeclared role capability",
-    "post-untrusted expansion approval"
+    "post-untrusted expansion approval",
+    "cyclic role hierarchy"
   ]
 }, null, 2));

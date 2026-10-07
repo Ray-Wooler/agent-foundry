@@ -142,15 +142,36 @@ export function assessContextualAuthorityContract(aps: Record<string, any>): Con
   if (roleIds.length !== new Set(roleIds).size) reasons.push("contextual authority role ids must be unique");
   const knownRoles = new Set(roleIds);
 
+  const parentsByRole = new Map<string, string[]>();
   for (const role of roles) {
     if (!role || typeof role !== "object") continue;
+    const roleId = typeof role.id === "string" ? role.id : "";
+    const parents = Array.isArray(role.inherits)
+      ? role.inherits.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    if (roleId) parentsByRole.set(roleId, parents);
     for (const capabilityId of Array.isArray(role.capabilities) ? role.capabilities : []) {
       if (!capabilities.has(capabilityId)) reasons.push(`contextual authority role ${String(role.id)} references undeclared capability ${String(capabilityId)}`);
     }
-    for (const parentRoleId of Array.isArray(role.inherits) ? role.inherits : []) {
+    for (const parentRoleId of parents) {
       if (!knownRoles.has(parentRoleId)) reasons.push(`contextual authority role ${String(role.id)} inherits unknown role ${String(parentRoleId)}`);
     }
   }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const hasCycle = (roleId: string): boolean => {
+    if (visiting.has(roleId)) return true;
+    if (visited.has(roleId)) return false;
+    visiting.add(roleId);
+    for (const parentRoleId of parentsByRole.get(roleId) ?? []) {
+      if (knownRoles.has(parentRoleId) && hasCycle(parentRoleId)) return true;
+    }
+    visiting.delete(roleId);
+    visited.add(roleId);
+    return false;
+  };
+  if (roleIds.some((roleId: string) => hasCycle(roleId))) reasons.push("contextual authority role hierarchy must be acyclic");
 
   return { required, present: true, eligible: reasons.length === 0, reasons };
 }

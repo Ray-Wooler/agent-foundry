@@ -127,15 +127,37 @@ def semantic(doc):
         if len(role_ids)!=len(set(role_ids)):
             errs.append("INV-021: contextual authority role ids must be unique")
         known_roles=set(role_ids)
+        parents_by_role={}
         for role in roles:
             if not isinstance(role,dict):
                 continue
+            role_id=role.get("id")
+            parents=[p for p in role.get("inherits",[]) if isinstance(p,str)]
+            if isinstance(role_id,str):
+                parents_by_role[role_id]=parents
             unknown_caps=set(role.get("capabilities",[]))-capability_ids
             if unknown_caps:
                 errs.append(f"INV-021: role {role.get('id')} references undeclared capabilities: {sorted(unknown_caps)}")
-            unknown_parents=set(role.get("inherits",[]))-known_roles
+            unknown_parents=set(parents)-known_roles
             if unknown_parents:
                 errs.append(f"INV-021: role {role.get('id')} inherits unknown roles: {sorted(unknown_parents)}")
+
+        visiting=set()
+        visited=set()
+        def has_cycle(role_id):
+            if role_id in visiting:
+                return True
+            if role_id in visited:
+                return False
+            visiting.add(role_id)
+            for parent in parents_by_role.get(role_id,[]):
+                if parent in known_roles and has_cycle(parent):
+                    return True
+            visiting.remove(role_id)
+            visited.add(role_id)
+            return False
+        if any(has_cycle(role_id) for role_id in role_ids):
+            errs.append("INV-021: contextual authority role hierarchy must be acyclic")
     return errs
 
 def validate(path):
