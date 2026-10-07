@@ -72,7 +72,7 @@ The bootstrap account is controlled by `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_AD
 
 ## Governance
 
-The canonical repository is `git@github.com:Ray-Wooler/agent-foundry.git`.
+The canonical repository is `https://github.com/frankai-online/agent-foundry`.
 
 Protected `main` requires the Phase Zero integrity checks. See:
 
@@ -111,6 +111,23 @@ OPENAI_MODEL=...
 
 CI uses the deterministic provider through the same engine contract and separately tests the OpenAI Responses API adapter against a local protocol mock.
 
+
+## Contextual Authority Contract
+
+APS v1.5-alpha now includes a Contextual Authority Contract (CAC) for authority-bearing agents.
+
+CAC separates conceptual capability and reusable authorization from task-active authority. Authority-bearing APS documents must specify inactive-by-default contextual activation, bounded/expiring task authority, fail-closed runtime enforcement requirements, credential isolation, authority-expansion rules, subset-only delegation, and audit evidence.
+
+PromptForge emits a conservative CAC skeleton but does not grant execution/delegation authority, construct active permission roles, or bind runtime tools.
+
+Certification readiness and certification deterministically re-check CAC conformance. An authority-bearing APS that lacks a conforming CAC cannot be marked eligible or certified.
+
+**Runtime boundary:** the Authority Resolver, task capability tokens, credential broker, and runtime enforcement gateway are not implemented by this change. CAC defines the contract those future components must satisfy.
+
+See:
+
+- `specification/APS-1.5-alpha/CONTEXTUAL-AUTHORITY-CONTRACT.md`
+- `docs/architecture/ADR-0006-CONTEXTUAL-AUTHORITY.md`
 
 ## Phase 3 Review Governance
 
