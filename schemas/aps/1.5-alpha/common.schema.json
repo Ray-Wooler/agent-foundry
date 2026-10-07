@@ -191,7 +191,8 @@
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/nonEmptyString"
-          }
+          },
+          "minItems": 1
         },
         "inherits": {
           "type": "array",
