@@ -2,7 +2,7 @@
 
 The authoritative source-control boundary for Agent Foundry V1 is:
 
-`git@github.com:Ray-Wooler/agent-foundry.git`
+`https://github.com/frankai-online/agent-foundry`
 
 This repository is the canonical source of truth for application code, APS schemas and extensions, PromptForge, compiler and evaluator implementations, migrations, tests, infrastructure definitions, architecture decisions, configuration templates and release history.
 
@@ -31,6 +31,12 @@ Agent Foundry owns source-agent intake, PromptForge transformation, APS specific
 13. Persistent state identifies its authoritative store.
 14. Consequential side effects require applicable authority.
 15. Claims of execution or verification require evidence.
+16. Reusable authorization does not imply active task authority.
+17. Active authority is contextual, inactive by default, bounded in scope, and expiring.
+18. Authority expansion after untrusted context requires explicit human approval.
+19. Runtime authority enforcement fails closed before consequential tool execution.
+20. Service credentials remain isolated from model/agent execution.
+21. Contextual roles cannot invent capabilities or expand delegation authority.
 
 ## Implementation Strategy
 

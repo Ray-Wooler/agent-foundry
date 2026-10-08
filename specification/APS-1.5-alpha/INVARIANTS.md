@@ -18,6 +18,13 @@
 | INV-014 | Claims of execution require execution evidence | Semantic: IMPLEMENTED/TESTED/VERIFIED/DEPLOYED/OBSERVED execution states require evidence. |
 | INV-015 | Claims of verification require verification evidence | Semantic: VERIFIED/OBSERVED require verification_evidence. |
 
+| INV-016 | Reusable authorization does not imply active task authority | Structural/semantic: authority-bearing APS documents require a Contextual Authority Contract; reusable authorization is distinct from contextual activation. |
+| INV-017 | Active authority is contextual, inactive by default and expiring | Schema/semantic: contextual activation defaults to INACTIVE, is TASK or SESSION scoped, and requires expiry. |
+| INV-018 | Authority expansion after untrusted context requires explicit human approval | Schema/semantic: replanning that expands authority requires reauthorization; post-untrusted-context expansion requires human approval. |
+| INV-019 | Runtime authority enforcement fails closed | Schema/semantic: runtime enforcement is mandatory and the fail mode is DENY. |
+| INV-020 | Service credentials remain isolated from agents | Schema/semantic: the contract requires credential isolation rather than exposing bearer credentials to the model/agent. |
+| INV-021 | Contextual roles cannot invent capabilities or parents | Semantic: role capability references must resolve to declared APS capabilities and inherited roles must resolve within the contract. |
+
 ## Enforcement Classes
 
 **Schema** validates document shape, required fields, enums and separation of concepts.

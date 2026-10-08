@@ -1,59 +1,390 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema",
-  "$id":"https://foundry.frankai.online/schemas/aps/1.5-alpha/common.schema.json",
-  "title":"APS v1.5-alpha Common Definitions",
-  "$defs":{
-    "nonEmptyString":{"type":"string","minLength":1},
-    "stringArray":{"type":"array","items":{"type":"string"}},
-    "capability":{
-      "type":"object","additionalProperties":false,
-      "required":["id","description"],
-      "properties":{
-        "id":{"$ref":"#/$defs/nonEmptyString"},
-        "description":{"$ref":"#/$defs/nonEmptyString"},
-        "inputs":{"$ref":"#/$defs/stringArray"},
-        "outputs":{"$ref":"#/$defs/stringArray"},
-        "preconditions":{"$ref":"#/$defs/stringArray"},
-        "required_permissions":{"$ref":"#/$defs/stringArray"},
-        "side_effect_classes":{"$ref":"#/$defs/stringArray"},
-        "evidence_requirements":{"$ref":"#/$defs/stringArray"},
-        "acceptance_criteria":{"$ref":"#/$defs/stringArray"}
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foundry.frankai.online/schemas/aps/1.5-alpha/common.schema.json",
+  "title": "APS v1.5-alpha Common Definitions",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
       }
     },
-    "authority":{
-      "type":"object","additionalProperties":false,
-      "required":["recommendation","execution","delegation"],
-      "properties":{
-        "recommendation":{"$ref":"#/$defs/stringArray"},
-        "execution":{"$ref":"#/$defs/stringArray"},
-        "delegation":{"$ref":"#/$defs/stringArray"},
-        "approval_required":{"$ref":"#/$defs/stringArray"},
-        "prohibited":{"$ref":"#/$defs/stringArray"}
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "inputs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "outputs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "preconditions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "required_permissions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "side_effect_classes": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "evidence_requirements": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "acceptance_criteria": {
+          "$ref": "#/$defs/stringArray"
+        }
       }
     },
-    "temporalValidity":{
-      "type":"object","additionalProperties":false,
-      "properties":{
-        "observed_at":{"type":["string","null"],"format":"date-time"},
-        "valid_from":{"type":["string","null"],"format":"date-time"},
-        "valid_until":{"type":["string","null"],"format":"date-time"},
-        "review_after":{"type":["string","null"],"format":"date-time"},
-        "stale_after":{"type":["string","null"],"format":"date-time"}
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recommendation",
+        "execution",
+        "delegation"
+      ],
+      "properties": {
+        "recommendation": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "execution": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "delegation": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "approval_required": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "prohibited": {
+          "$ref": "#/$defs/stringArray"
+        }
       }
     },
-    "claim":{
-      "type":"object","additionalProperties":false,
-      "required":["id","statement","type","status"],
-      "properties":{
-        "id":{"$ref":"#/$defs/nonEmptyString"},
-        "statement":{"$ref":"#/$defs/nonEmptyString"},
-        "type":{"enum":["observation","finding","assessment","attribution","forecast","recommendation"]},
-        "status":{"enum":["PROPOSED","SUPPORTED","DISPUTED","SUPERSEDED","WITHDRAWN"]},
-        "evidence_for":{"$ref":"#/$defs/stringArray"},
-        "evidence_against":{"$ref":"#/$defs/stringArray"},
-        "assumptions":{"$ref":"#/$defs/stringArray"},
-        "confidence":{"type":["string","null"]},
-        "temporal_validity":{"$ref":"#/$defs/temporalValidity"}
+    "temporalValidity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "valid_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "valid_until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "review_after": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "stale_after": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "statement",
+        "type",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "statement": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "type": {
+          "enum": [
+            "observation",
+            "finding",
+            "assessment",
+            "attribution",
+            "forecast",
+            "recommendation"
+          ]
+        },
+        "status": {
+          "enum": [
+            "PROPOSED",
+            "SUPPORTED",
+            "DISPUTED",
+            "SUPERSEDED",
+            "WITHDRAWN"
+          ]
+        },
+        "evidence_for": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "evidence_against": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "assumptions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "confidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "temporal_validity": {
+          "$ref": "#/$defs/temporalValidity"
+        }
+      }
+    },
+    "contextualAuthorityRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "capabilities"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "minItems": 1
+        },
+        "inherits": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "contextualAuthorityContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "authority_model",
+        "roles",
+        "activation",
+        "authorization_modes",
+        "task_token",
+        "runtime_enforcement",
+        "replanning",
+        "delegation",
+        "audit"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": "1.0"
+        },
+        "authority_model": {
+          "const": "contextual_least_privilege"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contextualAuthorityRole"
+          }
+        },
+        "activation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "default",
+            "scope",
+            "expiry_required"
+          ],
+          "properties": {
+            "default": {
+              "const": "INACTIVE"
+            },
+            "scope": {
+              "enum": [
+                "TASK",
+                "SESSION"
+              ]
+            },
+            "expiry_required": {
+              "const": true
+            }
+          }
+        },
+        "authorization_modes": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 4,
+          "items": {
+            "enum": [
+              "ALLOW_TASK",
+              "ALLOW_SESSION",
+              "AUTHORIZE_ROLE",
+              "DENY"
+            ]
+          }
+        },
+        "task_token": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "task_bound",
+            "plan_bound",
+            "expiry_required"
+          ],
+          "properties": {
+            "task_bound": {
+              "const": true
+            },
+            "plan_bound": {
+              "const": true
+            },
+            "expiry_required": {
+              "const": true
+            }
+          }
+        },
+        "runtime_enforcement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "required",
+            "fail_mode",
+            "credential_isolation_required"
+          ],
+          "properties": {
+            "required": {
+              "const": true
+            },
+            "fail_mode": {
+              "const": "DENY"
+            },
+            "credential_isolation_required": {
+              "const": true
+            }
+          }
+        },
+        "replanning": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority_expansion_requires_reauthorization",
+            "post_untrusted_context_expansion_requires_human_approval"
+          ],
+          "properties": {
+            "authority_expansion_requires_reauthorization": {
+              "const": true
+            },
+            "post_untrusted_context_expansion_requires_human_approval": {
+              "const": true
+            }
+          }
+        },
+        "delegation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "child_authority_must_be_subset"
+          ],
+          "properties": {
+            "child_authority_must_be_subset": {
+              "const": true
+            }
+          }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "record_plan",
+            "record_requested_roles",
+            "record_approved_roles",
+            "record_active_roles",
+            "record_tool_invocations",
+            "record_denials"
+          ],
+          "properties": {
+            "record_plan": {
+              "const": true
+            },
+            "record_requested_roles": {
+              "const": true
+            },
+            "record_approved_roles": {
+              "const": true
+            },
+            "record_active_roles": {
+              "const": true
+            },
+            "record_tool_invocations": {
+              "const": true
+            },
+            "record_denials": {
+              "const": true
+            }
+          }
+        },
+        "resource_constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "argument_constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "budgets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
       }
     }
   }
