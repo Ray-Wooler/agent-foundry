@@ -108,6 +108,9 @@
         },
         "retrieved_content_is_data": {
           "type": "boolean"
+        },
+        "contextual_authority": {
+          "$ref": "common.schema.json#/$defs/contextualAuthorityContract"
         }
       }
     },

@@ -13,46 +13,84 @@
     "secondary_objectives": [],
     "non_goals": []
   },
-  "capabilities": [{
-    "id": "inspect",
-    "description": "Inspect supplied data without side effects.",
-    "inputs": ["data"],
-    "outputs": ["assessment"],
-    "preconditions": [],
-    "required_permissions": [],
-    "side_effect_classes": [],
-    "evidence_requirements": [],
-    "acceptance_criteria": ["assessment returned"]
-  }],
+  "capabilities": [
+    {
+      "id": "inspect",
+      "description": "Inspect supplied data without side effects.",
+      "inputs": [
+        "data"
+      ],
+      "outputs": [
+        "assessment"
+      ],
+      "preconditions": [],
+      "required_permissions": [],
+      "side_effect_classes": [],
+      "evidence_requirements": [],
+      "acceptance_criteria": [
+        "assessment returned"
+      ]
+    }
+  ],
   "governance": {
     "authority": {
-      "recommendation": ["assess"],
+      "recommendation": [
+        "assess"
+      ],
       "execution": [],
       "delegation": [],
       "approval_required": [],
-      "prohibited": ["fabricate_execution"]
+      "prohibited": [
+        "fabricate_execution"
+      ]
     },
     "policies": []
   },
   "sufficiency": {
     "answerability_policy": {
-      "required_information": ["The supplied data and requested assessment scope are available."],
+      "required_information": [
+        "The supplied data and requested assessment scope are available."
+      ],
       "acceptable_assumptions": [],
-      "prohibited_assumptions": ["Do not invent missing facts."],
+      "prohibited_assumptions": [
+        "Do not invent missing facts."
+      ],
       "clarification": {
-        "ask_when": ["A required input cannot be safely retrieved or inferred."],
-        "do_not_ask_when": ["The missing fact is available from an authoritative declared source."],
+        "ask_when": [
+          "A required input cannot be safely retrieved or inferred."
+        ],
+        "do_not_ask_when": [
+          "The missing fact is available from an authoritative declared source."
+        ],
         "question_selection": "Ask for the highest-consequence missing requirement first."
       },
-      "retrieval_conditions": ["Retrieve authoritative evidence when the task is knowable and access is available."],
-      "abstention_conditions": ["Abstain when required information is unavailable or epistemically unknowable."],
+      "retrieval_conditions": [
+        "Retrieve authoritative evidence when the task is knowable and access is available."
+      ],
+      "abstention_conditions": [
+        "Abstain when required information is unavailable or epistemically unknowable."
+      ],
       "consolidation_strategy": "RECONSTRUCT_STRUCTURED_TASK_STATE_BEFORE_FINAL_ANSWER",
-      "state_taxonomy": ["MISSING_USER_INFORMATION","MISSING_EVIDENCE","EPISTEMIC_UNKNOWN","READY_TO_ANSWER","INSUFFICIENT_AUTHORITY"]
+      "state_taxonomy": [
+        "MISSING_USER_INFORMATION",
+        "MISSING_EVIDENCE",
+        "EPISTEMIC_UNKNOWN",
+        "READY_TO_ANSWER",
+        "INSUFFICIENT_AUTHORITY"
+      ]
     },
     "pre_execution_consolidation": {
       "required": true,
       "fail_closed": true,
-      "include": ["objective","known constraints","evidence","assumptions","missing requirements","authority state"]
+      "include": [
+        "objective",
+        "known constraints",
+        "retrieved evidence and provenance",
+        "assumptions",
+        "unresolved requirements",
+        "tool-access state",
+        "authority state"
+      ]
     }
   }
 }

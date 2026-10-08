@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL } from "node:url";
 import { digestSessionToken, issueSessionToken, normalizeEmail, verifyPassword } from "@agent-foundry/auth";
 import { query, transaction } from "@agent-foundry/db";
-import { canonicalJson, sha256Text, type RightsStatus } from "@agent-foundry/domain";
+import { assessContextualAuthorityContract, canonicalJson, sha256Text, type RightsStatus } from "@agent-foundry/domain";
 import { assertSafeObjectKeySegment } from "@agent-foundry/storage";
 import {
   buildReleaseBundle,
@@ -932,9 +932,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     try {
       const result=await transaction(async(client)=>{
         const plan=await client.query(
-          `SELECT p.agent_version_id,p.status,p.aggregate_outcome,av.status agent_version_status
+          `SELECT p.agent_version_id,p.status,p.aggregate_outcome,av.status agent_version_status,
+                  aps.document aps_document
            FROM evaluation_plans p
            JOIN agent_versions av ON av.id=p.agent_version_id
+           JOIN aps_specifications aps ON aps.agent_version_id=av.id
            WHERE p.id=$1
            FOR UPDATE`,
           [planId],
@@ -942,6 +944,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         const item=plan.rows[0];
         if(!item) throw new Error("evaluation_plan_not_found");
         if(item.status!=="COMPLETED" || item.agent_version_status!=="EVALUATED") throw new Error("evaluation_not_complete");
+
+        const contextualAuthority=assessContextualAuthorityContract((item.aps_document??{}) as Record<string,any>);
+        if(decision==="ELIGIBLE" && !contextualAuthority.eligible) {
+          throw new Error(`contextual_authority_contract_not_certifiable: ${contextualAuthority.reasons.join("; ")}`);
+        }
 
         const existing=await client.query("SELECT 1 FROM certification_readiness_decisions WHERE agent_version_id=$1",[item.agent_version_id]);
         if(existing.rowCount) throw new Error("certification_readiness_already_recorded");
@@ -975,7 +982,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
            VALUES ($1,'certification_readiness_decided','agent_version',$2,$3,$4::jsonb)`,
           [
             user.id,item.agent_version_id,readiness.rows[0]!.id,
-            JSON.stringify({planId,decision,aggregateOutcome:item.aggregate_outcome,reviewerRole:role}),
+            JSON.stringify({planId,decision,aggregateOutcome:item.aggregate_outcome,reviewerRole:role,contextualAuthority}),
           ],
         );
 
@@ -990,7 +997,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return json(res,200,result);
     } catch(error) {
       const message=error instanceof Error?error.message:String(error);
-      if(["evaluation_plan_not_found","evaluation_not_complete","certification_readiness_already_recorded"].includes(message) || message.includes("ELIGIBLE certification readiness requires PASS aggregate")) {
+      if(["evaluation_plan_not_found","evaluation_not_complete","certification_readiness_already_recorded"].includes(message) || message.includes("ELIGIBLE certification readiness requires PASS aggregate") || message.startsWith("contextual_authority_contract_not_certifiable")) {
         return json(res,409,{error:message});
       }
       throw error;
@@ -1021,12 +1028,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
           agent_version_id:string; status:string; aggregate_outcome:string;
           readiness_decision_id:string; readiness_decision:string;
           certification_status:string; certification_readiness_status:string;
-          aps_sha256:string;
+          aps_sha256:string; aps_document:Record<string,any>;
         }>(
           `SELECT p.agent_version_id,av.status,p.aggregate_outcome,
                   d.id readiness_decision_id,d.decision readiness_decision,
                   l.certification_status,l.certification_readiness_status,
-                  aps.sha256 aps_sha256
+                  aps.sha256 aps_sha256,aps.document aps_document
            FROM evaluation_plans p
            JOIN agent_versions av ON av.id=p.agent_version_id
            JOIN lifecycle_readiness l ON l.agent_version_id=av.id
@@ -1042,6 +1049,11 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         if(item.readiness_decision!=="ELIGIBLE" || item.certification_readiness_status!=="ELIGIBLE" || item.certification_status!=="ELIGIBLE") {
           throw new Error("agent_not_certification_eligible");
         }
+        const contextualAuthority=assessContextualAuthorityContract(item.aps_document??{});
+        if(decision==="CERTIFY" && !contextualAuthority.eligible) {
+          throw new Error(`contextual_authority_contract_not_certifiable: ${contextualAuthority.reasons.join("; ")}`);
+        }
+
         const existing=await client.query("SELECT 1 FROM certification_records WHERE agent_version_id=$1",[item.agent_version_id]);
         if(existing.rowCount) throw new Error("certification_already_recorded");
 
@@ -1051,6 +1063,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
           readinessDecisionId:item.readiness_decision_id,
           canonicalApsSha256:item.aps_sha256,
           evaluationAggregate:item.aggregate_outcome,
+          contextualAuthority,
         };
 
         const record=await client.query<{id:string;created_at:string}>(
@@ -1121,7 +1134,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return json(res,200,result);
     } catch(error) {
       const message=error instanceof Error?error.message:String(error);
-      if(["certification_context_missing","agent_not_evaluated","agent_not_certification_eligible","certification_already_recorded"].includes(message) || message.includes("certification requires")) {
+      if(["certification_context_missing","agent_not_evaluated","agent_not_certification_eligible","certification_already_recorded"].includes(message) || message.includes("certification requires") || message.startsWith("contextual_authority_contract_not_certifiable")) {
         return json(res,409,{error:message});
       }
       throw error;

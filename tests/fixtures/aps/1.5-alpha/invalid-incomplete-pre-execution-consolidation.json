@@ -25,7 +25,9 @@
       ],
       "preconditions": [],
       "required_permissions": [],
-      "side_effect_classes": [],
+      "side_effect_classes": [
+        "PROPOSED_CONSEQUENTIAL"
+      ],
       "evidence_requirements": [],
       "acceptance_criteria": [
         "assessment returned"
@@ -80,29 +82,11 @@
       ]
     },
     "pre_execution_consolidation": {
-      "required": false,
+      "required": true,
       "fail_closed": true,
       "include": [
-        "objective",
-        "known constraints",
-        "retrieved evidence and provenance",
-        "assumptions",
-        "unresolved requirements",
-        "tool-access state",
-        "authority state"
+        "objective"
       ]
     }
-  },
-  "operational": {
-    "tools": [],
-    "side_effects": [
-      {
-        "id": "external-mutation",
-        "consequence": "HIGH",
-        "authority_grant": "grant:external-mutation"
-      }
-    ],
-    "persistent_state": [],
-    "executions": []
   }
 }

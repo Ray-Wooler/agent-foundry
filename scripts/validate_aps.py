@@ -25,10 +25,16 @@ INVARIANTS={
 "INV-013":"Consequential side effects require an applicable authority grant.",
 "INV-014":"Claims of execution require execution evidence.",
 "INV-015":"Claims of verification require verification evidence.",
-"INV-016":"Answerability does not imply actionability or authority.",
-"INV-017":"Consequential execution requires pre-execution consolidation.",
-"INV-018":"Clarification must be tied to explicit missing requirements.",
-"INV-019":"Model confidence cannot substitute for typed sufficiency state.",
+"INV-016":"Reusable authorization does not imply active task authority.",
+"INV-017":"Active authority is contextual, inactive by default, bounded in scope, and expiring.",
+"INV-018":"Authority expansion after untrusted context requires explicit human approval.",
+"INV-019":"Runtime permission enforcement fails closed before tool execution.",
+"INV-020":"Service credentials remain isolated from the agent.",
+"INV-021":"Contextual roles reference only declared capabilities and valid parent roles.",
+"INV-022":"Answerability does not imply actionability or authority.",
+"INV-023":"Consequential execution requires pre-execution consolidation.",
+"INV-024":"Clarification must be tied to explicit missing requirements.",
+"INV-025":"Model confidence cannot substitute for typed sufficiency state.",
 }
 
 def load(p): return json.loads(Path(p).read_text())
@@ -75,7 +81,7 @@ def semantic(doc):
             errs.append(f"INV-010: corroborated claim {cl.get('id')} lacks source_lineages")
         if cl.get("freshness_material") is True and not cl.get("temporal_validity"):
             errs.append(f"INV-011: freshness-material claim {cl.get('id')} lacks temporal_validity")
-    # INV-016/017/018/019: sufficiency is explicit and cannot grant authority.
+    # INV-022..025: answerability/sufficiency is explicit and cannot grant authority.
     suff=doc.get("sufficiency")
     if isinstance(suff,dict):
         ap=suff.get("answerability_policy",{})
@@ -83,33 +89,130 @@ def semantic(doc):
         required_info=ap.get("required_information",[]) if isinstance(ap,dict) else []
         clarification=ap.get("clarification",{}) if isinstance(ap,dict) else {}
         if not required_info:
-            errs.append("INV-018: answerability policy requires explicit required_information")
+            errs.append("INV-024: answerability policy requires explicit required_information")
         if not isinstance(clarification,dict) or not clarification.get("ask_when") or not clarification.get("question_selection"):
-            errs.append("INV-018: clarification policy must target explicit missing requirements")
-        consequential=any(
+            errs.append("INV-024: clarification policy must target explicit missing requirements")
+
+        side_effect_consequential=any(
             isinstance(se,dict) and se.get("consequence") in {"HIGH","CRITICAL"}
             for se in op.get("side_effects",[])
         ) if isinstance(op,dict) else False
+        capability_consequential=any(
+            isinstance(cap,dict)
+            and isinstance(cap.get("side_effect_classes"),list)
+            and "PROPOSED_CONSEQUENTIAL" in cap.get("side_effect_classes",[])
+            for cap in doc.get("capabilities",[])
+        )
+        consequential=side_effect_consequential or capability_consequential
+        required_components={
+            "objective",
+            "known constraints",
+            "retrieved evidence and provenance",
+            "assumptions",
+            "unresolved requirements",
+            "tool-access state",
+            "authority state",
+        }
+        include=set(pec.get("include",[])) if isinstance(pec,dict) and isinstance(pec.get("include"),list) else set()
         if consequential and (
             not isinstance(pec,dict)
             or pec.get("required") is not True
             or pec.get("fail_closed") is not True
         ):
-            errs.append("INV-017: consequential execution requires fail-closed pre-execution consolidation")
+            errs.append("INV-023: consequential execution requires fail-closed pre-execution consolidation")
+        if consequential and not required_components.issubset(include):
+            errs.append(
+                "INV-023: consequential consolidation missing required components: "
+                + str(sorted(required_components-include))
+            )
         if any(k in suff for k in ("authority","execution","delegation","permissions")):
-            errs.append("INV-016: sufficiency contract cannot contain authority-bearing fields")
+            errs.append("INV-022: sufficiency contract cannot contain authority-bearing fields")
 
     # INV-008 is enforced as a governance contract flag for imported content.
     if doc.get("imported_content") and gov.get("retrieved_content_is_data") is not True:
         errs.append("INV-008: imported content requires retrieved_content_is_data=true")
     # INV-001/002/003: if operational declarations exist, each tool operation must declare permission and authority separately.
-    for tool in op.get("tools",[]) if isinstance(op,dict) else []:
+    tools=op.get("tools",[]) if isinstance(op,dict) else []
+    has_tool_operations=False
+    for tool in tools:
         for operation in tool.get("operations",[]):
             if isinstance(operation,dict):
+                has_tool_operations=True
                 if not operation.get("permission"):
                     errs.append(f"INV-002: tool operation {tool.get('id')}:{operation.get('name')} lacks permission")
                 if not operation.get("authority"):
                     errs.append(f"INV-003: tool operation {tool.get('id')}:{operation.get('name')} lacks authority")
+
+    # INV-016..021: Contextual Authority Contract (CAC).
+    cac=gov.get("contextual_authority")
+    side_effects=op.get("side_effects",[]) if isinstance(op,dict) else []
+    consequential_side_effect=any(
+        isinstance(se,dict) and se.get("consequence") not in {None,"NONE"}
+        for se in side_effects
+    )
+    contextual_authority_required=bool(execution or delegation or has_tool_operations or consequential_side_effect)
+    if contextual_authority_required and not isinstance(cac,dict):
+        errs.append("INV-016: authority-bearing APS requires governance.contextual_authority")
+
+    if isinstance(cac,dict):
+        activation=cac.get("activation")
+        activation=activation if isinstance(activation,dict) else {}
+        if activation.get("default")!="INACTIVE" or activation.get("scope") not in {"TASK","SESSION"} or activation.get("expiry_required") is not True:
+            errs.append("INV-017: contextual authority must default INACTIVE, be TASK/SESSION scoped, and expire")
+        replanning=cac.get("replanning")
+        replanning=replanning if isinstance(replanning,dict) else {}
+        if replanning.get("authority_expansion_requires_reauthorization") is not True or replanning.get("post_untrusted_context_expansion_requires_human_approval") is not True:
+            errs.append("INV-018: authority expansion must be reauthorized and post-untrusted expansion must require human approval")
+        runtime=cac.get("runtime_enforcement")
+        runtime=runtime if isinstance(runtime,dict) else {}
+        if runtime.get("required") is not True or runtime.get("fail_mode")!="DENY":
+            errs.append("INV-019: runtime contextual-authority enforcement must be required and fail closed")
+        if runtime.get("credential_isolation_required") is not True:
+            errs.append("INV-020: contextual authority requires credential isolation")
+
+        capability_ids={
+            cap.get("id") for cap in doc.get("capabilities",[])
+            if isinstance(cap,dict) and isinstance(cap.get("id"),str)
+        }
+        roles=cac.get("roles")
+        roles=roles if isinstance(roles,list) else []
+        if contextual_authority_required and not roles:
+            errs.append("INV-021: authority-bearing APS requires at least one contextual role")
+        role_ids=[r.get("id") for r in roles if isinstance(r,dict)]
+        if len(role_ids)!=len(set(role_ids)):
+            errs.append("INV-021: contextual authority role ids must be unique")
+        known_roles=set(role_ids)
+        parents_by_role={}
+        for role in roles:
+            if not isinstance(role,dict):
+                continue
+            role_id=role.get("id")
+            parents=[p for p in role.get("inherits",[]) if isinstance(p,str)]
+            if isinstance(role_id,str):
+                parents_by_role[role_id]=parents
+            unknown_caps=set(role.get("capabilities",[]))-capability_ids
+            if unknown_caps:
+                errs.append(f"INV-021: role {role.get('id')} references undeclared capabilities: {sorted(unknown_caps)}")
+            unknown_parents=set(parents)-known_roles
+            if unknown_parents:
+                errs.append(f"INV-021: role {role.get('id')} inherits unknown roles: {sorted(unknown_parents)}")
+
+        visiting=set()
+        visited=set()
+        def has_cycle(role_id):
+            if role_id in visiting:
+                return True
+            if role_id in visited:
+                return False
+            visiting.add(role_id)
+            for parent in parents_by_role.get(role_id,[]):
+                if parent in known_roles and has_cycle(parent):
+                    return True
+            visiting.remove(role_id)
+            visited.add(role_id)
+            return False
+        if any(has_cycle(role_id) for role_id in role_ids):
+            errs.append("INV-021: contextual authority role hierarchy must be acyclic")
     return errs
 
 def validate(path):

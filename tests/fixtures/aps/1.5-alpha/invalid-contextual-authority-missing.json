@@ -1,0 +1,52 @@
+{
+  "aps_version": "1.5-alpha",
+  "agent": {
+    "id": "cac-missing",
+    "name": "CAC Missing",
+    "version": "0.0.1",
+    "class": "specialist"
+  },
+  "mandate": {
+    "purpose": "Negative conformance fixture.",
+    "primary_objective": "Prove authority-bearing APS requires CAC."
+  },
+  "capabilities": [
+    {
+      "id": "inspect",
+      "description": "Inspect supplied data.",
+      "required_permissions": [
+        "data.read"
+      ]
+    }
+  ],
+  "governance": {
+    "authority": {
+      "recommendation": [],
+      "execution": [
+        "inspect_data"
+      ],
+      "delegation": [],
+      "approval_required": [],
+      "prohibited": []
+    },
+    "policies": [],
+    "retrieved_content_is_data": true
+  },
+  "operational": {
+    "tools": [
+      {
+        "id": "data-service",
+        "operations": [
+          {
+            "name": "read",
+            "permission": "data.read",
+            "authority": "inspect_data"
+          }
+        ]
+      }
+    ],
+    "side_effects": [],
+    "persistent_state": [],
+    "executions": []
+  }
+}

@@ -25,7 +25,9 @@
       ],
       "preconditions": [],
       "required_permissions": [],
-      "side_effect_classes": [],
+      "side_effect_classes": [
+        "PROPOSED_CONSEQUENTIAL"
+      ],
       "evidence_requirements": [],
       "acceptance_criteria": [
         "assessment returned"
@@ -92,17 +94,5 @@
         "authority state"
       ]
     }
-  },
-  "operational": {
-    "tools": [],
-    "side_effects": [
-      {
-        "id": "external-mutation",
-        "consequence": "HIGH",
-        "authority_grant": "grant:external-mutation"
-      }
-    ],
-    "persistent_state": [],
-    "executions": []
   }
 }
