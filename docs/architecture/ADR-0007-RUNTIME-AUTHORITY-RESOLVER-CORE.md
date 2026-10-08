@@ -1,6 +1,6 @@
 # ADR-0007 — Deterministic Runtime Authority Resolver Core
 
-Status: PROPOSED
+Status: ACCEPTED
 
 ## Context
 
