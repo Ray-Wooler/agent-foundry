@@ -18,7 +18,7 @@ Inputs are:
 - task and plan identity;
 - required capabilities derived from the execution plan;
 - reusable authorization evidence;
-- current time and optional session identity;
+- trusted control-plane time and optional session identity;
 - whether untrusted context has been consumed;
 - previously active contextual roles for replanning;
 - an optional delegation capability ceiling.
@@ -85,8 +85,9 @@ Those are subsequent gates.
 - Expired/task/session-mismatched authorization cannot activate authority.
 - Replanning after untrusted context cannot silently expand authority.
 - Delegation cannot exceed its supplied parent capability ceiling.
-- Contract cycles fail closed.
+- Contract cycles and weakened CAC runtime-enforcement semantics fail closed.
 - Resolution has no external side effects.
+- The caller must supply task/session identity and evaluation time from the trusted control plane, not model-generated content.
 - Exact least-privilege search has a deterministic complexity bound and fails closed beyond it.
 
 ## Acceptance

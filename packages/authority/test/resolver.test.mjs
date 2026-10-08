@@ -13,11 +13,22 @@ const contract={
     {id:"calendar-reader",capabilities:["calendar.read"],inherits:[]}
   ],
   activation:{default:"INACTIVE",scope:"TASK",expiry_required:true},
+  authorization_modes:["ALLOW_TASK","ALLOW_SESSION","AUTHORIZE_ROLE","DENY"],
+  task_token:{task_bound:true,plan_bound:true,expiry_required:true},
+  runtime_enforcement:{required:true,fail_mode:"DENY",credential_isolation_required:true},
   replanning:{
     authority_expansion_requires_reauthorization:true,
     post_untrusted_context_expansion_requires_human_approval:true
   },
-  delegation:{child_authority_must_be_subset:true}
+  delegation:{child_authority_must_be_subset:true},
+  audit:{
+    record_plan:true,
+    record_requested_roles:true,
+    record_approved_roles:true,
+    record_active_roles:true,
+    record_tool_invocations:true,
+    record_denials:true
+  }
 };
 
 function input(overrides={}) {
@@ -247,9 +258,9 @@ test("least privilege minimizes excess capabilities before role count",()=>{
   const exactContract={
     ...contract,
     roles:[
-      {id:"mail-reader",capabilities:["mail.read"],inherits:[]},
-      {id:"calendar-reader",capabilities:["calendar.read"],inherits:[]},
-      {id:"mega",capabilities:["mail.read","calendar.read","mail.delete","calendar.delete"],inherits:[]}
+      {id:"a-mega",capabilities:["mail.read","calendar.read","mail.delete","calendar.delete"],inherits:[]},
+      {id:"b-mail-reader",capabilities:["mail.read"],inherits:[]},
+      {id:"c-calendar-reader",capabilities:["calendar.read"],inherits:[]}
     ]
   };
   const result=resolveAuthority(input({
@@ -261,13 +272,13 @@ test("least privilege minimizes excess capabilities before role count",()=>{
       consumedUntrustedContext:false
     },
     authorizations:[
-      {authorizationId:"mail-auth",roleId:"mail-reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
-      {authorizationId:"cal-auth",roleId:"calendar-reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
-      {authorizationId:"mega-auth",roleId:"mega",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"}
+      {authorizationId:"mega-auth",roleId:"a-mega",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
+      {authorizationId:"mail-auth",roleId:"b-mail-reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
+      {authorizationId:"cal-auth",roleId:"c-calendar-reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"}
     ]
   }));
   assert.equal(result.status,"ALLOW");
-  assert.deepEqual(result.selectedRoleIds,["calendar-reader","mail-reader"]);
+  assert.deepEqual(result.selectedRoleIds,["b-mail-reader","c-calendar-reader"]);
   assert.deepEqual(result.selectedCapabilities,["calendar.read","mail.read"]);
 });
 
@@ -304,4 +315,28 @@ test("deny decisions never imply an approval path",()=>{
   assert.equal(result.status,"DENY");
   assert.deepEqual(result.requiredApprovalRoleIds,[]);
   assert.deepEqual(result.evidence.denialAuthorizationIds,["deny-reader"]);
+});
+
+test("duplicate authorization evidence ids fail closed",()=>{
+  assert.throws(
+    ()=>resolveAuthority(input({
+      authorizations:[
+        {authorizationId:"same",roleId:"reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
+        {authorizationId:"same",roleId:"sender",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"}
+      ]
+    })),
+    /authorization ids must be unique/
+  );
+});
+
+test("resolver rejects a CAC that weakens fail-closed runtime enforcement",()=>{
+  assert.throws(
+    ()=>resolveAuthority(input({
+      contract:{
+        ...contract,
+        runtime_enforcement:{required:true,fail_mode:"ALLOW",credential_isolation_required:true}
+      }
+    })),
+    /runtime enforcement contract/
+  );
 });

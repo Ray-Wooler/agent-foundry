@@ -19,6 +19,17 @@ export type ContextualAuthorityContract = {
     scope: "TASK" | "SESSION";
     expiry_required: true;
   };
+  authorization_modes: AuthorizationMode[];
+  task_token: {
+    task_bound: true;
+    plan_bound: true;
+    expiry_required: true;
+  };
+  runtime_enforcement: {
+    required: true;
+    fail_mode: "DENY";
+    credential_isolation_required: true;
+  };
   replanning: {
     authority_expansion_requires_reauthorization: true;
     post_untrusted_context_expansion_requires_human_approval: true;
@@ -26,6 +37,17 @@ export type ContextualAuthorityContract = {
   delegation: {
     child_authority_must_be_subset: true;
   };
+  audit: {
+    record_plan: true;
+    record_requested_roles: true;
+    record_approved_roles: true;
+    record_active_roles: true;
+    record_tool_invocations: true;
+    record_denials: true;
+  };
+  resource_constraints?: string[];
+  argument_constraints?: string[];
+  budgets?: string[];
 };
 
 export type ExecutionPlanAuthorityRequest = {
@@ -156,6 +178,22 @@ function validateInput(input: AuthorityResolutionInput): void {
   if (!["TASK", "SESSION"].includes(contract.activation?.scope)) {
     throw new Error("invalid authority resolver input: activation scope");
   }
+  const contractModes = Array.isArray(contract.authorization_modes)
+    ? uniqueSorted(contract.authorization_modes)
+    : [];
+  if (JSON.stringify(contractModes) !== JSON.stringify(["ALLOW_SESSION", "ALLOW_TASK", "AUTHORIZE_ROLE", "DENY"])) {
+    throw new Error("invalid authority resolver input: authorization modes");
+  }
+  if (contract.task_token?.task_bound !== true
+    || contract.task_token?.plan_bound !== true
+    || contract.task_token?.expiry_required !== true) {
+    throw new Error("invalid authority resolver input: task token contract");
+  }
+  if (contract.runtime_enforcement?.required !== true
+    || contract.runtime_enforcement?.fail_mode !== "DENY"
+    || contract.runtime_enforcement?.credential_isolation_required !== true) {
+    throw new Error("invalid authority resolver input: runtime enforcement contract");
+  }
   if (contract.replanning?.authority_expansion_requires_reauthorization !== true
     || contract.replanning?.post_untrusted_context_expansion_requires_human_approval !== true) {
     throw new Error("invalid authority resolver input: replanning contract");
@@ -183,6 +221,11 @@ function validateInput(input: AuthorityResolutionInput): void {
   }
 
   const modes = new Set<AuthorizationMode>(["ALLOW_TASK", "ALLOW_SESSION", "AUTHORIZE_ROLE", "DENY"]);
+  const authorizationIds = input.authorizations.map((authorization) => authorization?.authorizationId);
+  if (authorizationIds.some((id) => typeof id !== "string" || id.length === 0)
+    || new Set(authorizationIds).size !== authorizationIds.length) {
+    throw new Error("invalid authority resolver input: authorization ids must be unique and non-empty");
+  }
   for (const authorization of input.authorizations) {
     if (!authorization || typeof authorization !== "object") {
       throw new Error("invalid authority resolver input: authorization record");
@@ -281,7 +324,6 @@ function chooseLeastPrivilegeRoles(closures: RoleClosure[], requiredCapabilities
 
   let best: RoleClosure[] | null = null;
   const search = (index: number, selected: RoleClosure[]) => {
-    if (best && selected.length > best.length) return;
     if (coversRequired(selected, required)) {
       if (!best || compareSelections(selected, best, required) < 0) best = [...selected];
       return;
