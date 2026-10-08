@@ -34,8 +34,8 @@ Outputs are:
 
 The least-privilege selector minimizes, in order:
 
-1. number of selected roles;
-2. capabilities beyond those required by the plan;
+1. capabilities beyond those required by the plan;
+2. number of selected roles;
 3. lexical role identity as a deterministic tie-breaker.
 
 Role inheritance contributes inherited capabilities and cyclic hierarchies fail closed. Exact subset search is bounded to 20 candidate roles in this first executable core; exceeding that bound fails closed rather than permitting unbounded combinatorial work.
@@ -58,9 +58,9 @@ A child resolution that exceeds a supplied parent/delegation capability ceiling 
 
 ## Evidence
 
-Every decision records the resolver version, task/plan IDs, required capabilities, selected roles and capabilities, prior active capability boundary, missing capabilities, unauthorized roles, expired authorizations, delegation violations, untrusted-context state, expansion state and reasons.
+Every decision records the resolver version, CAC digest, evaluation timestamp, task/plan/session identity, required capabilities, selected roles and capabilities, prior active capability boundary, supporting and denying authorization references, expired authorizations, the delegation ceiling and any delegation violations, untrusted-context state, expansion state and reasons.
 
-The decision ID is the SHA-256 digest of canonical decision evidence.
+The decision ID is the SHA-256 digest of canonical decision evidence, binding the result to the authority records and CAC used for the decision.
 
 ## Explicit non-decisions
 

@@ -242,3 +242,66 @@ test("resolver enforces a bounded exact-search candidate set",()=>{
     /complexity bound exceeded/
   );
 });
+
+test("least privilege minimizes excess capabilities before role count",()=>{
+  const exactContract={
+    ...contract,
+    roles:[
+      {id:"mail-reader",capabilities:["mail.read"],inherits:[]},
+      {id:"calendar-reader",capabilities:["calendar.read"],inherits:[]},
+      {id:"mega",capabilities:["mail.read","calendar.read","mail.delete","calendar.delete"],inherits:[]}
+    ]
+  };
+  const result=resolveAuthority(input({
+    contract:exactContract,
+    plan:{
+      taskId:"task-1",
+      planId:"plan-1",
+      requiredCapabilities:["mail.read","calendar.read"],
+      consumedUntrustedContext:false
+    },
+    authorizations:[
+      {authorizationId:"mail-auth",roleId:"mail-reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
+      {authorizationId:"cal-auth",roleId:"calendar-reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
+      {authorizationId:"mega-auth",roleId:"mega",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"}
+    ]
+  }));
+  assert.equal(result.status,"ALLOW");
+  assert.deepEqual(result.selectedRoleIds,["calendar-reader","mail-reader"]);
+  assert.deepEqual(result.selectedCapabilities,["calendar.read","mail.read"]);
+});
+
+test("decision evidence binds the authority records and contract used",()=>{
+  const first=resolveAuthority(input({
+    authorizations:[
+      {authorizationId:"auth-a",roleId:"reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"}
+    ]
+  }));
+  const second=resolveAuthority(input({
+    authorizations:[
+      {authorizationId:"auth-b",roleId:"reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"}
+    ]
+  }));
+  assert.deepEqual(first.evidence.supportingAuthorizationIds,["auth-a"]);
+  assert.deepEqual(second.evidence.supportingAuthorizationIds,["auth-b"]);
+  assert.notEqual(first.decisionId,second.decisionId);
+  assert.match(first.evidence.contractSha256,/^[a-f0-9]{64}$/);
+});
+
+test("deny decisions never imply an approval path",()=>{
+  const result=resolveAuthority(input({
+    plan:{
+      taskId:"task-1",
+      planId:"plan-1",
+      requiredCapabilities:["mail.send"],
+      consumedUntrustedContext:false
+    },
+    authorizations:[
+      {authorizationId:"allow-sender",roleId:"sender",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-10T00:00:00.000Z"},
+      {authorizationId:"deny-reader",roleId:"reader",mode:"DENY",expiresAt:"2026-10-10T00:00:00.000Z"}
+    ]
+  }));
+  assert.equal(result.status,"DENY");
+  assert.deepEqual(result.requiredApprovalRoleIds,[]);
+  assert.deepEqual(result.evidence.denialAuthorizationIds,["deny-reader"]);
+});

@@ -58,8 +58,11 @@ export type AuthorityResolutionStatus = "ALLOW" | "REQUIRES_APPROVAL" | "DENY";
 
 export type AuthorityDecisionEvidence = {
   resolverVersion: string;
+  contractSha256: string;
+  evaluatedAt: string;
   taskId: string;
   planId: string;
+  sessionId: string | null;
   requiredCapabilities: string[];
   selectedRoleIds: string[];
   selectedCapabilities: string[];
@@ -67,7 +70,10 @@ export type AuthorityDecisionEvidence = {
   missingCapabilities: string[];
   unauthorizedRoleIds: string[];
   deniedRoleIds: string[];
+  supportingAuthorizationIds: string[];
+  denialAuthorizationIds: string[];
   expiredAuthorizationIds: string[];
+  delegationCeilingCapabilities: string[] | null;
   delegationExceededCapabilities: string[];
   consumedUntrustedContext: boolean;
   authorityExpansion: boolean;
@@ -122,7 +128,12 @@ function validateInput(input: AuthorityResolutionInput): void {
   if (!Array.isArray(input.authorizations)) {
     throw new Error("invalid authority resolver input: authorizations");
   }
-  if (input.previousActiveRoleIds !== undefined && !Array.isArray(input.previousActiveRoleIds)) {
+  if (input.sessionId !== undefined && (typeof input.sessionId !== "string" || input.sessionId.length === 0)) {
+    throw new Error("invalid authority resolver input: sessionId");
+  }
+  if (input.previousActiveRoleIds !== undefined
+    && (!Array.isArray(input.previousActiveRoleIds)
+      || input.previousActiveRoleIds.some((roleId) => typeof roleId !== "string" || roleId.length === 0))) {
     throw new Error("invalid authority resolver input: previousActiveRoleIds");
   }
   if (input.delegationCeilingCapabilities !== undefined
@@ -185,10 +196,18 @@ function validateInput(input: AuthorityResolutionInput): void {
       throw new Error(`invalid authority resolver input: authorization ${authorization.authorizationId}.mode`);
     }
     parseTimestamp(authorization.expiresAt, `authorization ${authorization.authorizationId}.expiresAt`);
-    if (authorization.mode === "ALLOW_TASK" && !authorization.taskId) {
+    if (authorization.mode === "ALLOW_TASK"
+      && (typeof authorization.taskId !== "string" || authorization.taskId.length === 0)) {
       throw new Error(`invalid authority resolver input: authorization ${authorization.authorizationId}.taskId`);
     }
-    if (authorization.mode === "ALLOW_SESSION" && !authorization.sessionId) {
+    if (authorization.mode === "ALLOW_SESSION"
+      && (typeof authorization.sessionId !== "string" || authorization.sessionId.length === 0)) {
+      throw new Error(`invalid authority resolver input: authorization ${authorization.authorizationId}.sessionId`);
+    }
+    if (authorization.taskId !== undefined && (typeof authorization.taskId !== "string" || authorization.taskId.length === 0)) {
+      throw new Error(`invalid authority resolver input: authorization ${authorization.authorizationId}.taskId`);
+    }
+    if (authorization.sessionId !== undefined && (typeof authorization.sessionId !== "string" || authorization.sessionId.length === 0)) {
       throw new Error(`invalid authority resolver input: authorization ${authorization.authorizationId}.sessionId`);
     }
   }
@@ -236,7 +255,6 @@ function coversRequired(selected: RoleClosure[], required: Set<string>): boolean
 }
 
 function compareSelections(a: RoleClosure[], b: RoleClosure[], required: Set<string>): number {
-  if (a.length !== b.length) return a.length - b.length;
   const extras = (selection: RoleClosure[]) => {
     const union = new Set<string>();
     for (const role of selection) for (const capability of role.capabilities) union.add(capability);
@@ -246,6 +264,7 @@ function compareSelections(a: RoleClosure[], b: RoleClosure[], required: Set<str
   };
   const extraDiff = extras(a) - extras(b);
   if (extraDiff !== 0) return extraDiff;
+  if (a.length !== b.length) return a.length - b.length;
   return a.map((role) => role.roleId).sort().join("\u0000")
     .localeCompare(b.map((role) => role.roleId).sort().join("\u0000"));
 }
@@ -350,23 +369,29 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
     else applicableAllowAuthorizations.push(authorization);
   }
 
-  const roleAuthorized = (selectedRoleId: string): boolean => {
+  const supportingAuthorizationsForRole = (selectedRoleId: string): ReusableAuthorization[] => {
     const selectedClosure = closureMap.get(selectedRoleId)!;
-    return applicableAllowAuthorizations.some((authorization) => {
+    return applicableAllowAuthorizations.filter((authorization) => {
       const authorizedClosure = closureMap.get(authorization.roleId)!;
       return setIsSubset(selectedClosure, authorizedClosure);
     });
   };
-  const roleDenied = (selectedRoleId: string): boolean => {
+  const denialsForRole = (selectedRoleId: string): ReusableAuthorization[] => {
     const selectedClosure = closureMap.get(selectedRoleId)!;
-    return applicableDenials.some((authorization) => {
+    return applicableDenials.filter((authorization) => {
       const deniedClosure = closureMap.get(authorization.roleId)!;
       return setIsSubset(deniedClosure, selectedClosure);
     });
   };
 
-  const unauthorizedRoleIds = selectedRoleIds.filter((roleId) => !roleAuthorized(roleId));
-  const deniedRoleIds = selectedRoleIds.filter((roleId) => roleDenied(roleId));
+  const unauthorizedRoleIds = selectedRoleIds.filter((roleId) => supportingAuthorizationsForRole(roleId).length === 0);
+  const deniedRoleIds = selectedRoleIds.filter((roleId) => denialsForRole(roleId).length > 0);
+  const supportingAuthorizationIds = uniqueSorted(selectedRoleIds.flatMap((roleId) =>
+    supportingAuthorizationsForRole(roleId).map((authorization) => authorization.authorizationId),
+  ));
+  const denialAuthorizationIds = uniqueSorted(selectedRoleIds.flatMap((roleId) =>
+    denialsForRole(roleId).map((authorization) => authorization.authorizationId),
+  ));
   const requiresPostUntrustedApproval =
     input.plan.consumedUntrustedContext && authorityExpansion;
   const requiredApprovalRoleIds = requiresPostUntrustedApproval
@@ -400,8 +425,11 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
 
   const evidence: AuthorityDecisionEvidence = {
     resolverVersion: AUTHORITY_RESOLVER_VERSION,
+    contractSha256: sha256Text(canonicalJson(input.contract)),
+    evaluatedAt: new Date(nowMs).toISOString(),
     taskId: input.plan.taskId,
     planId: input.plan.planId,
+    sessionId: input.sessionId ?? null,
     requiredCapabilities,
     selectedRoleIds,
     selectedCapabilities,
@@ -409,7 +437,12 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
     missingCapabilities,
     unauthorizedRoleIds,
     deniedRoleIds,
+    supportingAuthorizationIds,
+    denialAuthorizationIds,
     expiredAuthorizationIds: uniqueSorted(expiredAuthorizationIds),
+    delegationCeilingCapabilities: input.delegationCeilingCapabilities
+      ? uniqueSorted(input.delegationCeilingCapabilities)
+      : null,
     delegationExceededCapabilities,
     consumedUntrustedContext: input.plan.consumedUntrustedContext,
     authorityExpansion,
@@ -420,7 +453,7 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
     status,
     selectedRoleIds,
     selectedCapabilities,
-    requiredApprovalRoleIds: uniqueSorted(requiredApprovalRoleIds),
+    requiredApprovalRoleIds: status === "REQUIRES_APPROVAL" ? uniqueSorted(requiredApprovalRoleIds) : [],
     decisionId: sha256Text(canonicalJson(evidence)),
     evidence,
   };
