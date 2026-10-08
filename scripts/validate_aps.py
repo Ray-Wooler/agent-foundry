@@ -104,13 +104,16 @@ def semantic(doc):
         errs.append("INV-016: authority-bearing APS requires governance.contextual_authority")
 
     if isinstance(cac,dict):
-        activation=cac.get("activation",{})
+        activation=cac.get("activation")
+        activation=activation if isinstance(activation,dict) else {}
         if activation.get("default")!="INACTIVE" or activation.get("scope") not in {"TASK","SESSION"} or activation.get("expiry_required") is not True:
             errs.append("INV-017: contextual authority must default INACTIVE, be TASK/SESSION scoped, and expire")
-        replanning=cac.get("replanning",{})
+        replanning=cac.get("replanning")
+        replanning=replanning if isinstance(replanning,dict) else {}
         if replanning.get("authority_expansion_requires_reauthorization") is not True or replanning.get("post_untrusted_context_expansion_requires_human_approval") is not True:
             errs.append("INV-018: authority expansion must be reauthorized and post-untrusted expansion must require human approval")
-        runtime=cac.get("runtime_enforcement",{})
+        runtime=cac.get("runtime_enforcement")
+        runtime=runtime if isinstance(runtime,dict) else {}
         if runtime.get("required") is not True or runtime.get("fail_mode")!="DENY":
             errs.append("INV-019: runtime contextual-authority enforcement must be required and fail closed")
         if runtime.get("credential_isolation_required") is not True:
@@ -120,7 +123,8 @@ def semantic(doc):
             cap.get("id") for cap in doc.get("capabilities",[])
             if isinstance(cap,dict) and isinstance(cap.get("id"),str)
         }
-        roles=cac.get("roles",[])
+        roles=cac.get("roles")
+        roles=roles if isinstance(roles,list) else []
         if contextual_authority_required and not roles:
             errs.append("INV-021: authority-bearing APS requires at least one contextual role")
         role_ids=[r.get("id") for r in roles if isinstance(r,dict)]
