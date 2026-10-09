@@ -428,3 +428,332 @@ export async function persistPolicyEnforcementDecision(
     return { auditRecordId: inserted.rows[0]!.id, evidenceId, inserted: true };
   });
 }
+
+const CREDENTIAL_WORKSPACE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CREDENTIAL_HANDLE_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+function validCredentialHandle(value: string): boolean {
+  return value.length <= 520
+    && CREDENTIAL_HANDLE_PATTERN.test(value)
+    && !value.includes("..");
+}
+
+export type PersistedCredentialBindingRecord = {
+  bindingId: string;
+  workspaceId: string;
+  registrySha256: string;
+  toolId: string;
+  operation: string;
+  operationBindingId: string;
+  provider: string;
+  credentialHandle: string;
+  status: "ACTIVE" | "DISABLED";
+};
+
+export async function persistCredentialBindingRecord(
+  binding: PersistedCredentialBindingRecord,
+): Promise<{ bindingId: string; workspaceId: string; inserted: boolean }> {
+  if (!binding.bindingId.trim()
+    || !CREDENTIAL_WORKSPACE_UUID.test(binding.workspaceId)
+    || !/^[a-f0-9]{64}$/.test(binding.registrySha256)
+    || !binding.toolId.trim()
+    || !binding.operation.trim()
+    || !binding.operationBindingId.trim()
+    || !binding.provider.trim()
+    || !validCredentialHandle(binding.credentialHandle)
+    || !["ACTIVE", "DISABLED"].includes(binding.status)) {
+    throw new Error("credential binding record is invalid");
+  }
+
+  const result = await query<{ binding_id: string; workspace_id: string }>(
+    `INSERT INTO credential_binding_records(
+       workspace_id,binding_id,registry_sha256,tool_id,operation,operation_binding_id,
+       provider,credential_handle,status
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (workspace_id,binding_id) DO NOTHING
+     RETURNING binding_id,workspace_id`,
+    [
+      binding.workspaceId,
+      binding.bindingId,
+      binding.registrySha256,
+      binding.toolId,
+      binding.operation,
+      binding.operationBindingId,
+      binding.provider,
+      binding.credentialHandle,
+      binding.status,
+    ],
+  );
+  if (result.rowCount) {
+    return {
+      bindingId: result.rows[0]!.binding_id,
+      workspaceId: result.rows[0]!.workspace_id,
+      inserted: true,
+    };
+  }
+
+  const existing = await query<{
+    binding_id: string;
+    workspace_id: string;
+    registry_sha256: string;
+    tool_id: string;
+    operation: string;
+    operation_binding_id: string;
+    provider: string;
+    credential_handle: string;
+    status: "ACTIVE" | "DISABLED";
+  }>(
+    `SELECT binding_id,workspace_id,registry_sha256,tool_id,operation,operation_binding_id,
+            provider,credential_handle,status
+     FROM credential_binding_records
+     WHERE workspace_id=$1 AND binding_id=$2`,
+    [binding.workspaceId, binding.bindingId],
+  );
+  const row = existing.rows[0];
+  if (!row
+    || row.registry_sha256 !== binding.registrySha256
+    || row.tool_id !== binding.toolId
+    || row.operation !== binding.operation
+    || row.operation_binding_id !== binding.operationBindingId
+    || row.provider !== binding.provider
+    || row.credential_handle !== binding.credentialHandle
+    || row.status !== binding.status) {
+    throw new Error("credential binding persistence conflict");
+  }
+  return { bindingId: row.binding_id, workspaceId: row.workspace_id, inserted: false };
+}
+
+export async function getCredentialBindingRecord(
+  workspaceId: string,
+  bindingId: string,
+): Promise<PersistedCredentialBindingRecord | null> {
+  if (!CREDENTIAL_WORKSPACE_UUID.test(workspaceId) || !bindingId.trim()) {
+    throw new Error("credential binding lookup is invalid");
+  }
+  const result = await query<{
+    binding_id: string;
+    workspace_id: string;
+    registry_sha256: string;
+    tool_id: string;
+    operation: string;
+    operation_binding_id: string;
+    provider: string;
+    credential_handle: string;
+    status: "ACTIVE" | "DISABLED";
+  }>(
+    `SELECT binding_id,workspace_id,registry_sha256,tool_id,operation,operation_binding_id,
+            provider,credential_handle,status
+     FROM credential_binding_records
+     WHERE workspace_id=$1 AND binding_id=$2`,
+    [workspaceId, bindingId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    bindingId: row.binding_id,
+    workspaceId: row.workspace_id,
+    registrySha256: row.registry_sha256,
+    toolId: row.tool_id,
+    operation: row.operation,
+    operationBindingId: row.operation_binding_id,
+    provider: row.provider,
+    credentialHandle: row.credential_handle,
+    status: row.status,
+  };
+}
+
+export async function setCredentialBindingStatus(
+  workspaceId: string,
+  bindingId: string,
+  status: "ACTIVE" | "DISABLED",
+): Promise<{ bindingId: string; workspaceId: string; status: "ACTIVE" | "DISABLED" }> {
+  if (!CREDENTIAL_WORKSPACE_UUID.test(workspaceId)
+    || !bindingId.trim()
+    || !["ACTIVE", "DISABLED"].includes(status)) {
+    throw new Error("credential binding status update is invalid");
+  }
+  const result = await query<{
+    binding_id: string;
+    workspace_id: string;
+    status: "ACTIVE" | "DISABLED";
+  }>(
+    `UPDATE credential_binding_records
+     SET status=$3
+     WHERE workspace_id=$1 AND binding_id=$2
+     RETURNING binding_id,workspace_id,status`,
+    [workspaceId, bindingId, status],
+  );
+  if (!result.rowCount) throw new Error("credential binding not found");
+  return {
+    bindingId: result.rows[0]!.binding_id,
+    workspaceId: result.rows[0]!.workspace_id,
+    status: result.rows[0]!.status,
+  };
+}
+
+export type PersistedCredentialBrokerDecision = {
+  evidenceId: string;
+  outcome: "AUTHORIZED" | "EXECUTED" | "DENY" | "FAILED";
+  evidence: {
+    brokerVersion: string;
+    evaluatedAt: string;
+    outcome: "AUTHORIZED" | "EXECUTED" | "DENY" | "FAILED";
+    reason: string;
+    authorizationEvidenceId: string | null;
+    workspaceId: string;
+    enforcementEvidenceId: string;
+    authorityDecisionId: string;
+    tokenSha256: string;
+    taskId: string;
+    planId: string;
+    sessionId: string | null;
+    toolId: string;
+    operation: string;
+    operationBindingId: string;
+    credentialBindingId: string;
+    registrySha256: string;
+    provider: string;
+    credentialHandleSha256: string;
+  };
+};
+
+const CREDENTIAL_BROKER_EVIDENCE_KEYS = [
+  "authorizationEvidenceId",
+  "authorityDecisionId",
+  "brokerVersion",
+  "credentialBindingId",
+  "credentialHandleSha256",
+  "enforcementEvidenceId",
+  "evaluatedAt",
+  "operation",
+  "operationBindingId",
+  "outcome",
+  "planId",
+  "provider",
+  "reason",
+  "registrySha256",
+  "sessionId",
+  "taskId",
+  "tokenSha256",
+  "toolId",
+  "workspaceId",
+].sort();
+
+export async function persistCredentialBrokerDecision(
+  decision: PersistedCredentialBrokerDecision,
+): Promise<{ auditRecordId: string; evidenceId: string; inserted: boolean }> {
+  const keys = Object.keys(decision.evidence).sort();
+  if (JSON.stringify(keys) !== JSON.stringify(CREDENTIAL_BROKER_EVIDENCE_KEYS)) {
+    throw new Error("credential broker evidence contains unexpected fields");
+  }
+  if (decision.evidence.outcome !== decision.outcome) {
+    throw new Error("credential broker outcome does not match evidence");
+  }
+  const evidenceId = sha256Text(canonicalJson(decision.evidence));
+  if (decision.evidenceId !== evidenceId || !/^[a-f0-9]{64}$/.test(evidenceId)) {
+    throw new Error("credential broker evidence id does not match canonical evidence");
+  }
+  if (!decision.evidence.brokerVersion
+    || !CREDENTIAL_WORKSPACE_UUID.test(decision.evidence.workspaceId)
+    || !decision.evidence.reason
+    || !/^[a-f0-9]{64}$/.test(decision.evidence.enforcementEvidenceId)
+    || !/^[a-f0-9]{64}$/.test(decision.evidence.authorityDecisionId)
+    || !/^[a-f0-9]{64}$/.test(decision.evidence.tokenSha256)
+    || !decision.evidence.taskId
+    || !decision.evidence.planId
+    || !decision.evidence.toolId
+    || !decision.evidence.operation
+    || !decision.evidence.operationBindingId
+    || !decision.evidence.credentialBindingId
+    || !/^[a-f0-9]{64}$/.test(decision.evidence.registrySha256)
+    || !decision.evidence.provider
+    || !/^[a-f0-9]{64}$/.test(decision.evidence.credentialHandleSha256)
+    || Number.isNaN(Date.parse(decision.evidence.evaluatedAt))
+    || (decision.outcome === "EXECUTED"
+      && !/^[a-f0-9]{64}$/.test(String(decision.evidence.authorizationEvidenceId ?? "")))) {
+    throw new Error("credential broker evidence is incomplete");
+  }
+
+  return transaction(async (client) => {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+      [evidenceId],
+    );
+
+    const action = decision.outcome === "AUTHORIZED"
+      ? "credential_use_authorized"
+      : decision.outcome === "EXECUTED"
+        ? "credential_use_executed"
+        : decision.outcome === "DENY"
+          ? "credential_use_denied"
+          : "credential_use_failed";
+    const correlationId = `${decision.evidence.workspaceId}:${decision.evidence.taskId}:${decision.evidence.planId}`;
+
+    const existing = await client.query<{
+      id: string;
+      action: string;
+      authority_reference: string | null;
+      correlation_id: string | null;
+      evidence: unknown;
+    }>(
+      `SELECT id,action,authority_reference,correlation_id,evidence
+       FROM audit_records
+       WHERE target_type='credential_broker_decision' AND target_id=$1
+       ORDER BY recorded_at ASC
+       LIMIT 1`,
+      [evidenceId],
+    );
+    if (existing.rowCount) {
+      const row = existing.rows[0]!;
+      if (row.action !== action
+        || row.authority_reference !== decision.evidence.authorityDecisionId
+        || row.correlation_id !== correlationId
+        || canonicalJson(row.evidence) !== canonicalJson(decision.evidence)) {
+        throw new Error("credential broker audit persistence conflict");
+      }
+      return { auditRecordId: row.id, evidenceId, inserted: false };
+    }
+
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO audit_records(
+         actor,action,target_type,target_id,authority_reference,correlation_id,evidence
+       ) VALUES (
+         'credential-broker',$1,'credential_broker_decision',$2,$3,$4,$5::jsonb
+       )
+       RETURNING id`,
+      [
+        action,
+        evidenceId,
+        decision.evidence.authorityDecisionId,
+        correlationId,
+        JSON.stringify(decision.evidence),
+      ],
+    );
+    return { auditRecordId: inserted.rows[0]!.id, evidenceId, inserted: true };
+  });
+}
+
+export async function getPolicyEnforcementEvidenceRecord(evidenceId: string): Promise<{
+  evidenceId: string;
+  evidence: Record<string, unknown>;
+} | null> {
+  if (!/^[a-f0-9]{64}$/.test(evidenceId)) {
+    throw new Error("policy enforcement evidence id must be SHA-256");
+  }
+  const result = await query<{ target_id: string; evidence: Record<string, unknown> }>(
+    `SELECT target_id,evidence
+     FROM audit_records
+     WHERE target_type='policy_enforcement_decision' AND target_id=$1
+     ORDER BY recorded_at ASC
+     LIMIT 1`,
+    [evidenceId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const canonicalEvidenceId = sha256Text(canonicalJson(row.evidence));
+  if (canonicalEvidenceId !== row.target_id) {
+    throw new Error("persisted policy enforcement evidence digest mismatch");
+  }
+  return { evidenceId: row.target_id, evidence: row.evidence };
+}
+

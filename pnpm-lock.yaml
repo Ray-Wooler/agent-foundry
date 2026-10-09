@@ -67,6 +67,15 @@ importers:
         specifier: workspace:*
         version: link:../domain
 
+  packages/credentials:
+    dependencies:
+      '@agent-foundry/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@agent-foundry/enforcement':
+        specifier: workspace:*
+        version: link:../enforcement
+
   packages/db:
     dependencies:
       '@agent-foundry/domain':
