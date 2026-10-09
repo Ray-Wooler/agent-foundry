@@ -334,3 +334,35 @@ test("malformed session identity is normalized in denial evidence",()=>{
   assert.equal(result.reason,"invalid_enforcement_input");
   assert.equal(result.evidence.sessionId,"UNAVAILABLE");
 });
+
+test("non-string timestamps fail closed without coercion or exceptions",()=>{
+  const req=request();
+
+  const badNow=enforceInvocation({
+    ...req,
+    now:Symbol("bad-time")
+  });
+  assert.equal(badNow.outcome,"DENY");
+  assert.equal(badNow.reason,"invalid_enforcement_input");
+  assert.equal(badNow.evidence.evaluatedAt,null);
+
+  const badIssued=enforceInvocation({
+    ...req,
+    persistedTokenState:{
+      ...req.persistedTokenState,
+      issuedAt:Symbol("bad-issued-at")
+    }
+  });
+  assert.equal(badIssued.outcome,"DENY");
+  assert.equal(badIssued.reason,"invalid_persisted_token_state");
+
+  const numericExpiry=enforceInvocation({
+    ...req,
+    persistedTokenState:{
+      ...req.persistedTokenState,
+      expiresAt:0
+    }
+  });
+  assert.equal(numericExpiry.outcome,"DENY");
+  assert.equal(numericExpiry.reason,"invalid_persisted_token_state");
+});
