@@ -1,6 +1,6 @@
 # ADR-0009 — Runtime Policy Enforcement Point Core
 
-Status: PROPOSED
+Status: ACCEPTED
 
 ## Context
 
@@ -102,3 +102,7 @@ This ADR becomes ACCEPTED when:
 - exact-head CI is green;
 - durable-state integration is verified against PostgreSQL;
 - independent review finds no unresolved high-consequence defect.
+
+## Acceptance evidence
+
+PR #24 was merged as `bd29c347ac669841b5abe0484635d8aebf05a8cb`. Its exact reviewed head `e8fae6ab6b98f2be4d7062fb6821874c2ca3ddb0` completed all 17 associated CI workflows successfully, including Policy Enforcement Point and Production Operations.
