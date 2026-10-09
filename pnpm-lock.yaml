@@ -82,6 +82,15 @@ importers:
 
   packages/domain: {}
 
+  packages/enforcement:
+    dependencies:
+      '@agent-foundry/authority':
+        specifier: workspace:*
+        version: link:../authority
+      '@agent-foundry/domain':
+        specifier: workspace:*
+        version: link:../domain
+
   packages/evaluation: {}
 
   packages/promptforge:
