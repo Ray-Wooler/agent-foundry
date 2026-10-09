@@ -324,7 +324,7 @@ export type PersistedPolicyEnforcementDecision = {
   outcome: "ALLOW" | "DENY";
   evidence: {
     pepVersion: string;
-    evaluatedAt: string;
+    evaluatedAt: string | null;
     outcome: "ALLOW" | "DENY";
     reason: string;
     tokenSha256: string;
@@ -351,9 +351,18 @@ export async function persistPolicyEnforcementDecision(
   if (!decision.evidence.pepVersion
     || !decision.evidence.reason
     || !decision.evidence.taskId
-    || !decision.evidence.planId
-    || Number.isNaN(Date.parse(decision.evidence.evaluatedAt))) {
+    || !decision.evidence.planId) {
     throw new Error("policy enforcement evidence is incomplete");
+  }
+  if (decision.evidence.evaluatedAt !== null
+    && Number.isNaN(Date.parse(decision.evidence.evaluatedAt))) {
+    throw new Error("policy enforcement evidence has invalid evaluatedAt");
+  }
+  if (decision.outcome === "ALLOW"
+    && (decision.evidence.evaluatedAt === null
+      || decision.evidence.taskId === "UNAVAILABLE"
+      || decision.evidence.planId === "UNAVAILABLE")) {
+    throw new Error("allowed policy enforcement evidence requires complete invocation context");
   }
   if (decision.evidence.decisionId !== null
     && !/^[a-f0-9]{64}$/.test(decision.evidence.decisionId)) {

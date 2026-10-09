@@ -51,7 +51,7 @@ export type PolicyEnforcementOutcome = "ALLOW" | "DENY";
 
 export type PolicyEnforcementEvidence = {
   pepVersion: string;
-  evaluatedAt: string;
+  evaluatedAt: string | null;
   outcome: PolicyEnforcementOutcome;
   reason: string;
   tokenSha256: string;
@@ -124,7 +124,10 @@ function buildDecision(
   const state = input?.persistedTokenState ?? null;
   const rawNow = input?.now ?? "";
   const parsedNow = Date.parse(rawNow);
-  const evaluatedAt = Number.isNaN(parsedNow) ? rawNow : new Date(parsedNow).toISOString();
+  const evaluatedAt = Number.isNaN(parsedNow) ? null : new Date(parsedNow).toISOString();
+  const safeRequiredCapabilities = input?.binding && Array.isArray(input.binding.requiredCapabilities)
+    ? input.binding.requiredCapabilities.filter(validNonEmpty)
+    : [];
   const evidence: PolicyEnforcementEvidence = {
     pepVersion: POLICY_ENFORCEMENT_POINT_VERSION,
     evaluatedAt,
@@ -134,18 +137,18 @@ function buildDecision(
     tokenId: payload?.tokenId ?? state?.tokenId ?? null,
     decisionId: payload?.decisionId ?? state?.decisionId ?? null,
     contractSha256: payload?.contractSha256 ?? state?.contractSha256 ?? null,
-    taskId: input?.invocation?.taskId ?? "",
-    planId: input?.invocation?.planId ?? "",
+    taskId: validNonEmpty(input?.invocation?.taskId) ? input!.invocation.taskId : "UNAVAILABLE",
+    planId: validNonEmpty(input?.invocation?.planId) ? input!.invocation.planId : "UNAVAILABLE",
     sessionId: input?.invocation?.sessionId ?? null,
-    toolId: input?.invocation?.toolId ?? "",
-    operation: input?.invocation?.operation ?? "",
-    bindingId: input?.binding?.bindingId ?? "",
-    registrySha256: input?.binding?.registrySha256 ?? "",
-    requiredCapabilities: input?.binding && Array.isArray(input.binding.requiredCapabilities)
-      ? sorted(input.binding.requiredCapabilities)
-      : [],
-    missingCapabilities: payload && input?.binding && Array.isArray(input.binding.requiredCapabilities)
-      ? sorted(input.binding.requiredCapabilities.filter((capability) => !payload.capabilities.includes(capability)))
+    toolId: validNonEmpty(input?.invocation?.toolId) ? input!.invocation.toolId : "UNAVAILABLE",
+    operation: validNonEmpty(input?.invocation?.operation) ? input!.invocation.operation : "UNAVAILABLE",
+    bindingId: validNonEmpty(input?.binding?.bindingId) ? input!.binding.bindingId : "UNAVAILABLE",
+    registrySha256: validSha256(String(input?.binding?.registrySha256 ?? ""))
+      ? input!.binding.registrySha256
+      : "UNAVAILABLE",
+    requiredCapabilities: sorted(safeRequiredCapabilities),
+    missingCapabilities: payload
+      ? sorted(safeRequiredCapabilities.filter((capability) => !payload.capabilities.includes(capability)))
       : [],
     activeCapabilities: payload ? sorted(payload.capabilities) : [],
   };

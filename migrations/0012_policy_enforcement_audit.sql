@@ -23,7 +23,7 @@ BEGIN
   IF NEW.target_id !~ '^[a-f0-9]{64}$' THEN
     RAISE EXCEPTION 'policy enforcement evidence id must be SHA-256';
   END IF;
-  IF NEW.evidence->>'outcome' NOT IN ('ALLOW','DENY') THEN
+  IF COALESCE(NEW.evidence->>'outcome','') NOT IN ('ALLOW','DENY') THEN
     RAISE EXCEPTION 'policy enforcement audit outcome required';
   END IF;
   IF (NEW.action='protected_invocation_allowed' AND NEW.evidence->>'outcome'<>'ALLOW')
@@ -36,18 +36,33 @@ BEGIN
   IF COALESCE(NEW.evidence->>'taskId','')=''
      OR COALESCE(NEW.evidence->>'planId','')=''
      OR COALESCE(NEW.evidence->>'pepVersion','')=''
-     OR COALESCE(NEW.evidence->>'reason','')=''
-     OR COALESCE(NEW.evidence->>'evaluatedAt','')='' THEN
+     OR COALESCE(NEW.evidence->>'reason','')='' THEN
     RAISE EXCEPTION 'policy enforcement audit evidence incomplete';
   END IF;
 
-  BEGIN
-    evaluated_at := (NEW.evidence->>'evaluatedAt')::timestamptz;
-  EXCEPTION WHEN others THEN
-    RAISE EXCEPTION 'policy enforcement evaluatedAt must be a timestamp';
-  END;
+  IF COALESCE(NEW.authority_reference,'') <> COALESCE(NEW.evidence->>'decisionId','') THEN
+    RAISE EXCEPTION 'policy enforcement authority reference mismatch';
+  END IF;
+  IF COALESCE(NEW.correlation_id,'') <>
+     (NEW.evidence->>'taskId') || ':' || (NEW.evidence->>'planId') THEN
+    RAISE EXCEPTION 'policy enforcement correlation id mismatch';
+  END IF;
+
+  IF NEW.evidence->>'evaluatedAt' IS NOT NULL
+     AND NEW.evidence->>'evaluatedAt' <> '' THEN
+    BEGIN
+      evaluated_at := (NEW.evidence->>'evaluatedAt')::timestamptz;
+    EXCEPTION WHEN others THEN
+      RAISE EXCEPTION 'policy enforcement evaluatedAt must be a timestamp';
+    END;
+  ELSE
+    evaluated_at := NULL;
+  END IF;
 
   IF NEW.action='protected_invocation_allowed' THEN
+    IF evaluated_at IS NULL THEN
+      RAISE EXCEPTION 'allowed policy enforcement requires evaluation timestamp';
+    END IF;
     IF COALESCE(NEW.evidence->>'decisionId','') !~ '^[a-f0-9]{64}$' THEN
       RAISE EXCEPTION 'allowed policy enforcement requires authority decision id';
     END IF;

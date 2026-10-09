@@ -137,6 +137,27 @@ try {
   const persistedDeny=await persistPolicyEnforcementDecision(deniedAfterRevocation);
   assert.equal(persistedDeny.inserted,true);
 
+  const invalidRequestDeny=enforceInvocation({
+    ...base,
+    now:"not-a-time",
+    invocation:{
+      ...base.invocation,
+      taskId:"",
+      planId:""
+    },
+    binding:{
+      ...base.binding,
+      requiredCapabilities:[{},null]
+    }
+  });
+  assert.equal(invalidRequestDeny.outcome,"DENY");
+  assert.equal(invalidRequestDeny.reason,"invalid_enforcement_input");
+  assert.equal(invalidRequestDeny.evidence.evaluatedAt,null);
+  assert.equal(invalidRequestDeny.evidence.taskId,"UNAVAILABLE");
+  assert.equal(invalidRequestDeny.evidence.planId,"UNAVAILABLE");
+  const persistedInvalidDeny=await persistPolicyEnforcementDecision(invalidRequestDeny);
+  assert.equal(persistedInvalidDeny.inserted,true);
+
   const allowAudit=await query(
     "SELECT action,target_type,target_id,evidence FROM audit_records WHERE id=$1",
     [persistedAllow.auditRecordId]
@@ -203,6 +224,29 @@ try {
       ]
     ),
     /not backed by active persisted authority/
+  );
+
+  await assert.rejects(
+    query(
+      `INSERT INTO audit_records(
+         actor,action,target_type,target_id,authority_reference,correlation_id,evidence
+       ) VALUES (
+         'policy-enforcement-point','protected_invocation_denied',
+         'policy_enforcement_decision',$1,NULL,'missing:outcome',$2::jsonb
+       )`,
+      [
+        "9".repeat(64),
+        JSON.stringify({
+          pepVersion:"pep-core-1.0.0",
+          evaluatedAt:null,
+          reason:"invalid_enforcement_input",
+          tokenSha256:"8".repeat(64),
+          taskId:"UNAVAILABLE",
+          planId:"UNAVAILABLE"
+        })
+      ]
+    ),
+    /outcome required/
   );
 
   await assert.rejects(

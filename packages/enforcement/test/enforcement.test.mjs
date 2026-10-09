@@ -286,3 +286,17 @@ test("compound operations require every capability in the trusted binding",()=>{
   });
   assert.equal(sender.outcome,"ALLOW");
 });
+
+test("malformed capability arrays cannot crash DENY evidence construction",()=>{
+  const req=request();
+  const result=enforceInvocation({
+    ...req,
+    binding:{
+      ...req.binding,
+      requiredCapabilities:[{},42,null]
+    }
+  });
+  assert.equal(result.outcome,"DENY");
+  assert.equal(result.reason,"invalid_enforcement_input");
+  assert.deepEqual(result.evidence.requiredCapabilities,[]);
+});
