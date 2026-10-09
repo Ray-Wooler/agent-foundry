@@ -64,7 +64,7 @@ The issuer clamps token expiry to the earliest supporting authorization expiry. 
 
 Task capability tokens are not single-use tokens. Reuse within the same bound task and plan is permitted until expiry or revocation because a task may require multiple governed invocations.
 
-Replay into another task or plan fails closed. Expired, revoked, tampered, wrong-key and decision-mismatched tokens fail closed.
+Replay into another task, plan or session fails closed. Expired, revoked, tampered, non-canonical, wrong-key and decision-mismatched tokens fail closed. Token verification rejects non-canonical Base64URL signature text before revocation lookup so equivalent signature encodings cannot create a second token hash.
 
 The subsequent Policy Enforcement Point gate must consult durable token state before every protected invocation. The pure verifier accepts revocation state as an explicit trusted input; it does not silently assume a token is unrevoked.
 

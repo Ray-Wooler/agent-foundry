@@ -108,6 +108,7 @@ try {
     now:"2026-10-09T00:01:00.000Z",
     expectedTaskId:"authority-token-ci-task",
     expectedPlanId:"authority-token-ci-plan",
+    expectedSessionId:null,
     expectedDecisionId:resolution.decisionId
   });
   assert.equal(sameContextReplay.valid,true);
@@ -119,7 +120,8 @@ try {
     revokedTokenSha256s:[],
     now:"2026-10-09T00:01:00.000Z",
     expectedTaskId:"authority-token-ci-task",
-    expectedPlanId:"other-plan"
+    expectedPlanId:"other-plan",
+    expectedSessionId:null,
   });
   assert.equal(crossPlanReplay.valid,false);
   assert.equal(crossPlanReplay.reason,"plan_mismatch");
@@ -131,7 +133,8 @@ try {
     revokedTokenSha256s:[],
     now:"2026-10-09T00:02:00.000Z",
     expectedTaskId:"authority-token-ci-task",
-    expectedPlanId:"authority-token-ci-plan"
+    expectedPlanId:"authority-token-ci-plan",
+    expectedSessionId:null,
   });
   assert.equal(expired.valid,false);
   assert.equal(expired.reason,"expired");
@@ -150,6 +153,7 @@ try {
     now:"2026-10-09T00:01:00.000Z",
     expectedTaskId:"authority-token-ci-task",
     expectedPlanId:"authority-token-ci-plan",
+    expectedSessionId:null,
     revokedTokenSha256s:[issued.tokenSha256]
   });
   assert.equal(rejectedAfterRevocation.valid,false);

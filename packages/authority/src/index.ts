@@ -690,6 +690,7 @@ export function verifyCapabilityToken(input: {
   now: string;
   expectedTaskId: string;
   expectedPlanId: string;
+  expectedSessionId: string | null;
   expectedDecisionId?: string;
   revokedTokenSha256s: string[];
 }): CapabilityTokenVerification {
@@ -709,6 +710,9 @@ export function verifyCapabilityToken(input: {
     suppliedSignatureBytes = decodeBase64Url(suppliedSignature);
   } catch {
     return { valid: false, reason: "invalid_signature", tokenSha256 };
+  }
+  if (encodeBase64Url(suppliedSignatureBytes) !== suppliedSignature) {
+    return { valid: false, reason: "noncanonical_signature", tokenSha256 };
   }
   const signatureValid = verify(
     null,
@@ -768,6 +772,9 @@ export function verifyCapabilityToken(input: {
   }
   if (payload.planId !== input.expectedPlanId) {
     return { valid: false, reason: "plan_mismatch", tokenSha256 };
+  }
+  if (payload.sessionId !== input.expectedSessionId) {
+    return { valid: false, reason: "session_mismatch", tokenSha256 };
   }
   if (input.expectedDecisionId && payload.decisionId !== input.expectedDecisionId) {
     return { valid: false, reason: "decision_mismatch", tokenSha256 };

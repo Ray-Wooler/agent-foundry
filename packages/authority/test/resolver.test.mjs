@@ -413,6 +413,7 @@ test("verifies a token only for its bound task and plan",()=>{
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-1",
     expectedPlanId:"plan-1",
+    expectedSessionId:null,
     expectedDecisionId:resolution.decisionId
   });
   assert.equal(valid.valid,true);
@@ -424,7 +425,8 @@ test("verifies a token only for its bound task and plan",()=>{
     revokedTokenSha256s:[],
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-other",
-    expectedPlanId:"plan-1"
+    expectedPlanId:"plan-1",
+    expectedSessionId:null,
   });
   assert.deepEqual(taskReplay.valid?null:taskReplay.reason,"task_mismatch");
 
@@ -435,7 +437,8 @@ test("verifies a token only for its bound task and plan",()=>{
     revokedTokenSha256s:[],
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-1",
-    expectedPlanId:"plan-other"
+    expectedPlanId:"plan-other",
+    expectedSessionId:null,
   });
   assert.deepEqual(planReplay.valid?null:planReplay.reason,"plan_mismatch");
 });
@@ -457,7 +460,8 @@ test("expiry, revocation and signature tampering fail closed",()=>{
     revokedTokenSha256s:[],
     now:"2026-10-09T00:01:00.000Z",
     expectedTaskId:"task-1",
-    expectedPlanId:"plan-1"
+    expectedPlanId:"plan-1",
+    expectedSessionId:null,
   });
   assert.deepEqual(expired.valid?null:expired.reason,"expired");
 
@@ -468,6 +472,7 @@ test("expiry, revocation and signature tampering fail closed",()=>{
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-1",
     expectedPlanId:"plan-1",
+    expectedSessionId:null,
     revokedTokenSha256s:[issued.tokenSha256]
   });
   assert.deepEqual(revoked.valid?null:revoked.reason,"revoked");
@@ -482,7 +487,8 @@ test("expiry, revocation and signature tampering fail closed",()=>{
     revokedTokenSha256s:[],
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-1",
-    expectedPlanId:"plan-1"
+    expectedPlanId:"plan-1",
+    expectedSessionId:null,
   });
   assert.deepEqual(invalid.valid?null:invalid.reason,"invalid_signature");
 });
@@ -540,7 +546,8 @@ test("verification requires explicit revocation state and expected signing key i
     revokedTokenSha256s:undefined,
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-1",
-    expectedPlanId:"plan-1"
+    expectedPlanId:"plan-1",
+    expectedSessionId:null,
   });
   assert.equal(missingRevocation.valid,false);
   assert.equal(missingRevocation.reason,"revocation_state_required");
@@ -552,8 +559,85 @@ test("verification requires explicit revocation state and expected signing key i
     revokedTokenSha256s:[],
     now:"2026-10-09T00:00:30.000Z",
     expectedTaskId:"task-1",
-    expectedPlanId:"plan-1"
+    expectedPlanId:"plan-1",
+    expectedSessionId:null,
   });
   assert.equal(wrongKeyId.valid,false);
   assert.equal(wrongKeyId.reason,"key_mismatch");
+});
+
+
+test("token verification enforces signed session identity",()=>{
+  const resolution=resolveAuthority(input({
+    sessionId:"session-1",
+    authorizations:[
+      {
+        authorizationId:"session-reader",
+        roleId:"reader",
+        mode:"ALLOW_SESSION",
+        sessionId:"session-1",
+        expiresAt:"2026-10-10T00:00:00.000Z"
+      }
+    ]
+  }));
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:60
+  });
+  assert.equal(issued.payload.sessionId,"session-1");
+
+  const valid=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1",
+    expectedSessionId:"session-1"
+  });
+  assert.equal(valid.valid,true);
+
+  const replay=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1",
+    expectedSessionId:"session-2"
+  });
+  assert.equal(replay.valid,false);
+  assert.equal(replay.reason,"session_mismatch");
+});
+
+test("non-canonical signature text cannot bypass hash-based revocation",()=>{
+  const resolution=resolveAuthority(input());
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:60
+  });
+  const [prefix,payloadPart,signaturePart]=issued.token.split(".");
+  const aliasedToken=`${prefix}.${payloadPart}.${signaturePart}!`;
+  assert.notEqual(aliasedToken,issued.token);
+
+  const result=verifyCapabilityToken({
+    token:aliasedToken,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[issued.tokenSha256],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1",
+    expectedSessionId:null
+  });
+  assert.equal(result.valid,false);
+  assert.equal(result.reason,"noncanonical_signature");
 });
