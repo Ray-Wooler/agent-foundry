@@ -14,8 +14,11 @@ AuthorityGrant, Permission, Policy, HumanApproval, Delegation, SideEffect, Resou
 
 The Contextual Authority Contract (CAC) separates reusable authorization from task-active authority and defines inactive-by-default contextual activation, expiring task/plan binding, fail-closed runtime enforcement requirements, credential isolation, replanning escalation, subset-only delegation and audit evidence. See `CONTEXTUAL-AUTHORITY-CONTRACT.md`.
 
+### Sufficiency
+AnswerabilityPolicy, ClarificationPolicy, ConsolidationPolicy, MissingInformationState, PreExecutionConsolidation.
+
 ### Epistemic
-Source, Evidence, Claim, Provenance, Confidence, TemporalValidity, EvidenceRelation.
+Source, Evidence, Claim, Provenance, Confidence, TemporalValidity, EvidenceRelation. Confidence is evidence metadata, not a substitute for answerability or authority.
 
 ### Operational
 Tool, Environment, DeploymentProfile, Execution, ExecutionEvidence, ReleaseGate, RollbackPolicy, AuditRecord, Handoff.

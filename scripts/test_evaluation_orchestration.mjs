@@ -30,6 +30,7 @@ assert(token && projectId, "evaluation test requires authenticated project");
 const suites = await call("/v1/evaluation-suites", {}, token);
 assert(suites.suites.some((x) => x.suite_key === "core-governance-v1"), "core governance suite required");
 assert(suites.suites.some((x) => x.suite_key === "human-semantic-quality-v1"), "human quality suite required");
+assert(suites.suites.some((x) => x.suite_key === "multi-turn-underspecification-v1"), "multi-turn underspecification suite required");
 
 async function createApprovedCandidate(name) {
   const intake = await call("/v1/intake", {
@@ -72,7 +73,7 @@ const planCreated = await call("/v1/transformations/" + approved.id + "/evaluati
   body: "{}",
 }, token);
 assert(planCreated.agentVersionStatus === "VALIDATED", "plan freeze must promote CANDIDATE to VALIDATED");
-assert(planCreated.suites.length === 2, "default plan must contain machine and human suites");
+assert(planCreated.suites.length === 3, "default plan must contain governance, semantic and underspecification suites");
 
 await call("/v1/evaluation-plans/" + planCreated.planId + "/certification-readiness", {
   method: "POST",
@@ -88,8 +89,10 @@ for (let i = 0; i < 100; i++) {
 assert(plan?.plan?.status === "AWAITING_HUMAN", "plan must pause for human suite");
 const machine = plan.executions.find((x) => x.suite_key === "core-governance-v1");
 const human = plan.executions.find((x) => x.suite_key === "human-semantic-quality-v1");
+const underspec = plan.executions.find((x) => x.suite_key === "multi-turn-underspecification-v1");
 assert(machine?.status === "COMPLETED" && machine.outcome === "PASS", "machine suite must pass");
 assert(human?.status === "AWAITING_HUMAN", "human suite must await reviewer");
+assert(underspec?.status === "QUEUED", "underspecification suite must remain queued behind the first human gate");
 assert(plan.plan.agent_version_status === "VALIDATED", "agent remains VALIDATED while human evidence is pending");
 assert(plan.plan.certification_status === "NOT_ELIGIBLE", "evaluation progress cannot confer certification eligibility");
 
@@ -101,8 +104,27 @@ const humanResult = await call("/v1/evaluation-executions/" + human.id + "/human
     evidence: ["Reviewed PromptForge explanation and canonical APS."],
   }),
 }, token);
-assert(humanResult.planStatus === "COMPLETED", "human result should complete plan");
-assert(humanResult.aggregateOutcome === "PASS", "required suites should aggregate PASS");
+assert(humanResult.planStatus === "RUNNING", "semantic review should release the next required suite");
+
+for (let i = 0; i < 100; i++) {
+  plan = await call("/v1/evaluation-plans/" + planCreated.planId, {}, token);
+  const next = plan.executions.find((x) => x.suite_key === "multi-turn-underspecification-v1");
+  if (next?.status === "AWAITING_HUMAN") break;
+  await new Promise((resolve) => setTimeout(resolve, 200));
+}
+const underspecReady = plan.executions.find((x) => x.suite_key === "multi-turn-underspecification-v1");
+assert(underspecReady?.status === "AWAITING_HUMAN", "underspecification suite must reach behavioural review");
+
+const underspecResult = await call("/v1/evaluation-executions/" + underspecReady.id + "/human-review", {
+  method: "POST",
+  body: JSON.stringify({
+    outcome: "PASS",
+    rationale: "Progressive-disclosure behaviour avoids premature answers, targets missing constraints and preserves authority separation.",
+    evidence: ["Reviewed multi-turn underspecification scenarios against the canonical APS and agent behaviour."],
+  }),
+}, token);
+assert(underspecResult.planStatus === "COMPLETED", "all required reviews should complete plan");
+assert(underspecResult.aggregateOutcome === "PASS", "required suites should aggregate PASS");
 
 plan = await call("/v1/evaluation-plans/" + planCreated.planId, {}, token);
 assert(plan.plan.status === "COMPLETED", "plan must be completed");

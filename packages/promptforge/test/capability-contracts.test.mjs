@@ -20,6 +20,11 @@ test('capability contracts survive extraction, stage evidence and APS mapping wi
  assert.deepEqual(result.apsDocument.governance.contextual_authority.roles,[]);
  assert.equal(result.reviewPackage.validation.checks.find(x=>x.id==='PF2-010').passed,true);
  assert.equal(result.reviewPackage.validation.checks.find(x=>x.id==='PF2-011').passed,true);
+ assert.ok(result.apsDocument.sufficiency.answerability_policy.required_information.includes('Scoped human authorization'));
+ assert.equal(result.apsDocument.sufficiency.answerability_policy.clarification.question_selection,'Ask for the highest-consequence unresolved requirement first.');
+ assert.equal(result.apsDocument.sufficiency.pre_execution_consolidation.required,true);
+ assert.equal(result.apsDocument.sufficiency.pre_execution_consolidation.fail_closed,true);
+ assert.equal(result.reviewPackage.validation.checks.find(x=>x.id==='PF2-012').passed,true);
  assert.ok(result.apsDocument.extensions.promptforge.revision_request_sha256);
  assert.equal(result.reviewPackage.validation.status,'PASS');
 });
@@ -35,4 +40,15 @@ test('candidate validation detects lost structured evidence',async()=>{
  r.apsDocument.capabilities[0].preconditions=[];
  const v=validateGovernedCandidate(r.apsDocument,input,r.sourceSha256);
  assert.equal(v.status,'FAIL');assert.equal(v.checks.find(x=>x.id==='PF2-009').passed,false);
+});
+
+test('candidate sufficiency validation fails cleanly when capabilities are malformed',async()=>{
+ const r=await new PromptForgeEngine(provider({capabilities:[capability]})).transform(input);
+ for (const malformed of [undefined,null,'not-an-array',{}]) {
+   const candidate=structuredClone(r.apsDocument);
+   candidate.capabilities=malformed;
+   const v=validateGovernedCandidate(candidate,input,r.sourceSha256);
+   assert.equal(v.status,'FAIL');
+   assert.equal(v.checks.find(x=>x.id==='PF2-012').passed,false);
+ }
 });

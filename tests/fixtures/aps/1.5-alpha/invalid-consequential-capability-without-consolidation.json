@@ -25,7 +25,9 @@
       ],
       "preconditions": [],
       "required_permissions": [],
-      "side_effect_classes": [],
+      "side_effect_classes": [
+        "PROPOSED_CONSEQUENTIAL"
+      ],
       "evidence_requirements": [],
       "acceptance_criteria": [
         "assessment returned"
@@ -80,7 +82,7 @@
       ]
     },
     "pre_execution_consolidation": {
-      "required": true,
+      "required": false,
       "fail_closed": true,
       "include": [
         "objective",

@@ -386,6 +386,117 @@
           }
         }
       }
+    },
+    "clarificationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ask_when",
+        "question_selection"
+      ],
+      "properties": {
+        "ask_when": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "do_not_ask_when": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "question_selection": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "answerabilityPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_information",
+        "acceptable_assumptions",
+        "prohibited_assumptions",
+        "clarification",
+        "retrieval_conditions",
+        "abstention_conditions",
+        "consolidation_strategy",
+        "state_taxonomy"
+      ],
+      "properties": {
+        "required_information": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "acceptable_assumptions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "prohibited_assumptions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "clarification": {
+          "$ref": "#/$defs/clarificationPolicy"
+        },
+        "retrieval_conditions": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "abstention_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "consolidation_strategy": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "state_taxonomy": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "MISSING_USER_INFORMATION",
+              "MISSING_EVIDENCE",
+              "AMBIGUOUS_REQUIREMENT",
+              "CONFLICTING_EVIDENCE",
+              "EPISTEMIC_UNKNOWN",
+              "INSUFFICIENT_TOOL_ACCESS",
+              "INSUFFICIENT_AUTHORITY",
+              "READY_TO_ANSWER",
+              "READY_TO_ACT"
+            ]
+          }
+        }
+      }
+    },
+    "preExecutionConsolidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "fail_closed",
+        "include"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "fail_closed": {
+          "type": "boolean"
+        },
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
     }
   }
 }

@@ -138,4 +138,3 @@ Certification checks specification completeness only. They do not prove runtime 
 ## Security boundary and limitation
 
 CAC prevents authority expansion outside the declared contextual boundary. It does not by itself prove semantic correctness of an action already inside that boundary. Future runtime enforcement therefore also needs resource- and argument-level constraints, plan checks and budgets.
-

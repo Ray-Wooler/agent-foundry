@@ -661,7 +661,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     const body=await readJson(req);
     const requested=Array.isArray(body.suiteKeys)
       ? body.suiteKeys.filter((x):x is string=>typeof x==="string")
-      : ["core-governance-v1","human-semantic-quality-v1"];
+      : ["core-governance-v1","human-semantic-quality-v1","multi-turn-underspecification-v1"];
     const suiteKeys=[...new Set(requested)];
     if(!suiteKeys.length) return json(res,400,{error:"evaluation_suites_required"});
 

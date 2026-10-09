@@ -43,17 +43,23 @@ async function createCertifiedEligibleCandidate(name, rightsStatus="VERIFIED") {
   const plan=await call("/v1/transformations/"+candidate.id+"/evaluation-plan",{method:"POST",body:"{}"},token);
 
   let state;
-  for(let i=0;i<100;i++){
-    state=await call("/v1/evaluation-plans/"+plan.planId,{},token);
-    if(state.plan?.status==="AWAITING_HUMAN") break;
-    await new Promise(r=>setTimeout(r,200));
+  for(let gate=0;gate<10;gate++){
+    for(let i=0;i<100;i++){
+      state=await call("/v1/evaluation-plans/"+plan.planId,{},token);
+      if(["AWAITING_HUMAN","COMPLETED"].includes(state.plan?.status)) break;
+      await new Promise(r=>setTimeout(r,200));
+    }
+    if(state.plan?.status==="COMPLETED") break;
+    const human=state.executions.find(x=>x.status==="AWAITING_HUMAN");
+    assert(human,"required human evaluation gate missing");
+    await call("/v1/evaluation-executions/"+human.id+"/human-review",{method:"POST",body:JSON.stringify({
+      outcome:"PASS",
+      rationale:"Required human evaluation passed ("+human.suite_key+").",
+      evidence:["Certification flow human review evidence: "+human.suite_key]
+    })},token);
   }
-  const human=state.executions.find(x=>x.status==="AWAITING_HUMAN");
-  assert(human,"human evaluation required");
-
-  await call("/v1/evaluation-executions/"+human.id+"/human-review",{method:"POST",body:JSON.stringify({
-    outcome:"PASS",rationale:"Human quality evaluation passed.",evidence:["Human quality review evidence"]
-  })},token);
+  state=await call("/v1/evaluation-plans/"+plan.planId,{},token);
+  assert(state.plan?.status==="COMPLETED","all required evaluation gates must complete");
 
   state=await call("/v1/evaluation-plans/"+plan.planId,{},token);
   assert(state.plan.aggregate_outcome==="PASS"&&state.plan.agent_version_status==="EVALUATED","PASS EVALUATED state required");

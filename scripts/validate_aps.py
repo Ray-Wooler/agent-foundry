@@ -31,6 +31,10 @@ INVARIANTS={
 "INV-019":"Runtime permission enforcement fails closed before tool execution.",
 "INV-020":"Service credentials remain isolated from the agent.",
 "INV-021":"Contextual roles reference only declared capabilities and valid parent roles.",
+"INV-022":"Answerability does not imply actionability or authority.",
+"INV-023":"Consequential execution requires pre-execution consolidation.",
+"INV-024":"Clarification must be tied to explicit missing requirements.",
+"INV-025":"Model confidence cannot substitute for typed sufficiency state.",
 }
 
 def load(p): return json.loads(Path(p).read_text())
@@ -77,6 +81,53 @@ def semantic(doc):
             errs.append(f"INV-010: corroborated claim {cl.get('id')} lacks source_lineages")
         if cl.get("freshness_material") is True and not cl.get("temporal_validity"):
             errs.append(f"INV-011: freshness-material claim {cl.get('id')} lacks temporal_validity")
+    # INV-022..025: answerability/sufficiency is explicit and cannot grant authority.
+    suff=doc.get("sufficiency")
+    if isinstance(suff,dict):
+        ap=suff.get("answerability_policy",{})
+        pec=suff.get("pre_execution_consolidation",{})
+        required_info=ap.get("required_information",[]) if isinstance(ap,dict) else []
+        clarification=ap.get("clarification",{}) if isinstance(ap,dict) else {}
+        if not required_info:
+            errs.append("INV-024: answerability policy requires explicit required_information")
+        if not isinstance(clarification,dict) or not clarification.get("ask_when") or not clarification.get("question_selection"):
+            errs.append("INV-024: clarification policy must target explicit missing requirements")
+
+        side_effect_consequential=any(
+            isinstance(se,dict) and se.get("consequence") in {"HIGH","CRITICAL"}
+            for se in op.get("side_effects",[])
+        ) if isinstance(op,dict) else False
+        capability_consequential=any(
+            isinstance(cap,dict)
+            and isinstance(cap.get("side_effect_classes"),list)
+            and "PROPOSED_CONSEQUENTIAL" in cap.get("side_effect_classes",[])
+            for cap in doc.get("capabilities",[])
+        )
+        consequential=side_effect_consequential or capability_consequential
+        required_components={
+            "objective",
+            "known constraints",
+            "retrieved evidence and provenance",
+            "assumptions",
+            "unresolved requirements",
+            "tool-access state",
+            "authority state",
+        }
+        include=set(pec.get("include",[])) if isinstance(pec,dict) and isinstance(pec.get("include"),list) else set()
+        if consequential and (
+            not isinstance(pec,dict)
+            or pec.get("required") is not True
+            or pec.get("fail_closed") is not True
+        ):
+            errs.append("INV-023: consequential execution requires fail-closed pre-execution consolidation")
+        if consequential and not required_components.issubset(include):
+            errs.append(
+                "INV-023: consequential consolidation missing required components: "
+                + str(sorted(required_components-include))
+            )
+        if any(k in suff for k in ("authority","execution","delegation","permissions")):
+            errs.append("INV-022: sufficiency contract cannot contain authority-bearing fields")
+
     # INV-008 is enforced as a governance contract flag for imported content.
     if doc.get("imported_content") and gov.get("retrieved_content_is_data") is not True:
         errs.append("INV-008: imported content requires retrieved_content_is_data=true")
