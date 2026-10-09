@@ -300,3 +300,37 @@ test("malformed capability arrays cannot crash DENY evidence construction",()=>{
   assert.equal(result.reason,"invalid_enforcement_input");
   assert.deepEqual(result.evidence.requiredCapabilities,[]);
 });
+
+test("malformed persisted role or capability arrays fail closed rather than throwing",()=>{
+  const req=request();
+  const badRoles=enforceInvocation({
+    ...req,
+    persistedTokenState:{
+      ...req.persistedTokenState,
+      roleIds:[{}]
+    }
+  });
+  assert.equal(badRoles.outcome,"DENY");
+  assert.equal(badRoles.reason,"invalid_persisted_token_state");
+
+  const badCapabilities=enforceInvocation({
+    ...req,
+    persistedTokenState:{
+      ...req.persistedTokenState,
+      capabilities:[42]
+    }
+  });
+  assert.equal(badCapabilities.outcome,"DENY");
+  assert.equal(badCapabilities.reason,"invalid_persisted_token_state");
+});
+
+test("malformed session identity is normalized in denial evidence",()=>{
+  const req=request();
+  const result=enforceInvocation({
+    ...req,
+    invocation:{...req.invocation,sessionId:42}
+  });
+  assert.equal(result.outcome,"DENY");
+  assert.equal(result.reason,"invalid_enforcement_input");
+  assert.equal(result.evidence.sessionId,"UNAVAILABLE");
+});
