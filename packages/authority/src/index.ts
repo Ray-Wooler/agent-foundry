@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey, randomUUID, sign, verify } from "node:crypto";
 import { canonicalJson, sha256Text } from "@agent-foundry/domain";
 
 export const AUTHORITY_RESOLVER_VERSION = "authority-resolver-core-1.0.0";
@@ -79,6 +80,7 @@ export type AuthorityResolutionInput = {
 export type AuthorityResolutionStatus = "ALLOW" | "REQUIRES_APPROVAL" | "DENY";
 
 export type AuthorityDecisionEvidence = {
+  decisionStatus: AuthorityResolutionStatus;
   resolverVersion: string;
   contractSha256: string;
   evaluatedAt: string;
@@ -93,6 +95,7 @@ export type AuthorityDecisionEvidence = {
   unauthorizedRoleIds: string[];
   deniedRoleIds: string[];
   supportingAuthorizationIds: string[];
+  supportingAuthorizationExpiries: Array<{ authorizationId: string; expiresAt: string }>;
   denialAuthorizationIds: string[];
   expiredAuthorizationIds: string[];
   delegationCeilingCapabilities: string[] | null;
@@ -428,9 +431,22 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
 
   const unauthorizedRoleIds = selectedRoleIds.filter((roleId) => supportingAuthorizationsForRole(roleId).length === 0);
   const deniedRoleIds = selectedRoleIds.filter((roleId) => denialsForRole(roleId).length > 0);
-  const supportingAuthorizationIds = uniqueSorted(selectedRoleIds.flatMap((roleId) =>
-    supportingAuthorizationsForRole(roleId).map((authorization) => authorization.authorizationId),
-  ));
+  const supportingAuthorizations = selectedRoleIds.flatMap((roleId) =>
+    supportingAuthorizationsForRole(roleId),
+  );
+  const supportingAuthorizationIds = uniqueSorted(
+    supportingAuthorizations.map((authorization) => authorization.authorizationId),
+  );
+  const supportingAuthorizationExpiries = supportingAuthorizationIds.map((authorizationId) => {
+    const authorization = supportingAuthorizations.find((item) => item.authorizationId === authorizationId)!;
+    return {
+      authorizationId,
+      expiresAt: new Date(parseTimestamp(
+        authorization.expiresAt,
+        `authorization ${authorizationId}.expiresAt`,
+      )).toISOString(),
+    };
+  });
   const denialAuthorizationIds = uniqueSorted(selectedRoleIds.flatMap((roleId) =>
     denialsForRole(roleId).map((authorization) => authorization.authorizationId),
   ));
@@ -466,6 +482,7 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
   }
 
   const evidence: AuthorityDecisionEvidence = {
+    decisionStatus: status,
     resolverVersion: AUTHORITY_RESOLVER_VERSION,
     contractSha256: sha256Text(canonicalJson(input.contract)),
     evaluatedAt: new Date(nowMs).toISOString(),
@@ -480,6 +497,7 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
     unauthorizedRoleIds,
     deniedRoleIds,
     supportingAuthorizationIds,
+    supportingAuthorizationExpiries,
     denialAuthorizationIds,
     expiredAuthorizationIds: uniqueSorted(expiredAuthorizationIds),
     delegationCeilingCapabilities: input.delegationCeilingCapabilities
@@ -499,4 +517,263 @@ export function resolveAuthority(input: AuthorityResolutionInput): AuthorityReso
     decisionId: sha256Text(canonicalJson(evidence)),
     evidence,
   };
+}
+
+
+export const CAPABILITY_TOKEN_VERSION = "1.0";
+export const DEFAULT_CAPABILITY_TOKEN_TTL_SECONDS = 300;
+export const MAX_CAPABILITY_TOKEN_TTL_SECONDS = 900;
+export const MAX_DECISION_TOKEN_ISSUANCE_AGE_SECONDS = 300;
+
+export type CapabilityTokenPayload = {
+  version: "1.0";
+  tokenId: string;
+  issuer: "agent-foundry";
+  algorithm: "EdDSA";
+  keyId: string;
+  decisionId: string;
+  contractSha256: string;
+  taskId: string;
+  planId: string;
+  sessionId: string | null;
+  roleIds: string[];
+  capabilities: string[];
+  issuedAt: string;
+  expiresAt: string;
+};
+
+export type IssuedCapabilityToken = {
+  token: string;
+  tokenSha256: string;
+  payload: CapabilityTokenPayload;
+};
+
+function encodeBase64Url(value: string | Buffer): string {
+  return Buffer.from(value).toString("base64url");
+}
+
+function decodeBase64Url(value: string): Buffer {
+  return Buffer.from(value, "base64url");
+}
+
+function requirePrivateSigningKey(privateKeyPem: string) {
+  try {
+    const key = createPrivateKey(privateKeyPem);
+    if (key.asymmetricKeyType !== "ed25519") throw new Error("wrong key type");
+    return key;
+  } catch {
+    throw new Error("capability token signing key must be an Ed25519 private key");
+  }
+}
+
+function requirePublicVerificationKey(publicKeyPem: string) {
+  try {
+    const key = createPublicKey(publicKeyPem);
+    if (key.asymmetricKeyType !== "ed25519") throw new Error("wrong key type");
+    return key;
+  } catch {
+    throw new Error("capability token verification key must be an Ed25519 public key");
+  }
+}
+
+function signCapabilityPayload(encodedPayload: string, privateKeyPem: string): string {
+  const key = requirePrivateSigningKey(privateKeyPem);
+  return sign(
+    null,
+    Buffer.from(`afct1.${encodedPayload}`, "utf8"),
+    key,
+  ).toString("base64url");
+}
+
+function parseIso(value: string, field: string): number {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) throw new Error(`invalid capability token ${field}`);
+  return parsed;
+}
+
+export function issueCapabilityToken(input: {
+  resolution: AuthorityResolution;
+  privateKeyPem: string;
+  keyId: string;
+  now: string;
+  ttlSeconds?: number;
+}): IssuedCapabilityToken {
+  const { resolution, privateKeyPem } = input;
+  requirePrivateSigningKey(privateKeyPem);
+  assertNonEmpty(input.keyId, "capability token keyId");
+  const nowMs = parseIso(input.now, "issuance time");
+  const decisionEvaluatedAtMs = parseIso(resolution.evidence.evaluatedAt, "decision evaluatedAt");
+  if (nowMs < decisionEvaluatedAtMs) {
+    throw new Error("capability token issuance time precedes authority decision");
+  }
+  if (nowMs - decisionEvaluatedAtMs > MAX_DECISION_TOKEN_ISSUANCE_AGE_SECONDS * 1000) {
+    throw new Error("capability token issuance rejected stale authority decision");
+  }
+  const ttlSeconds = input.ttlSeconds ?? DEFAULT_CAPABILITY_TOKEN_TTL_SECONDS;
+  if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > MAX_CAPABILITY_TOKEN_TTL_SECONDS) {
+    throw new Error(`capability token ttl must be between 1 and ${MAX_CAPABILITY_TOKEN_TTL_SECONDS} seconds`);
+  }
+  if (resolution.status !== "ALLOW" || resolution.evidence.decisionStatus !== "ALLOW") {
+    throw new Error("capability token issuance requires an ALLOW authority decision");
+  }
+  if (resolution.decisionId !== sha256Text(canonicalJson(resolution.evidence))) {
+    throw new Error("capability token issuance rejected non-canonical authority decision evidence");
+  }
+  if (JSON.stringify(uniqueSorted(resolution.selectedRoleIds))
+      !== JSON.stringify(uniqueSorted(resolution.evidence.selectedRoleIds))
+    || JSON.stringify(uniqueSorted(resolution.selectedCapabilities))
+      !== JSON.stringify(uniqueSorted(resolution.evidence.selectedCapabilities))) {
+    throw new Error("capability token issuance rejected inconsistent authority decision projection");
+  }
+  if (resolution.requiredApprovalRoleIds.length
+    || resolution.evidence.missingCapabilities.length
+    || resolution.evidence.unauthorizedRoleIds.length
+    || resolution.evidence.deniedRoleIds.length
+    || resolution.evidence.delegationExceededCapabilities.length
+    || (resolution.evidence.consumedUntrustedContext && resolution.evidence.authorityExpansion)) {
+    throw new Error("capability token issuance rejected non-final authority decision");
+  }
+  if (!resolution.selectedCapabilities.length || !resolution.selectedRoleIds.length) {
+    throw new Error("capability token issuance requires non-empty active authority");
+  }
+  if (!resolution.evidence.supportingAuthorizationIds.length
+    || resolution.evidence.supportingAuthorizationExpiries.length !== resolution.evidence.supportingAuthorizationIds.length) {
+    throw new Error("capability token issuance requires supporting authorization evidence");
+  }
+
+  const earliestAuthorizationExpiry = Math.min(
+    ...resolution.evidence.supportingAuthorizationExpiries.map((item) => parseIso(item.expiresAt, "authorization expiry")),
+  );
+  if (earliestAuthorizationExpiry <= nowMs) {
+    throw new Error("capability token issuance rejected expired supporting authorization");
+  }
+  const requestedExpiry = nowMs + ttlSeconds * 1000;
+  const expiresAtMs = Math.min(requestedExpiry, earliestAuthorizationExpiry);
+  if (expiresAtMs <= nowMs) {
+    throw new Error("capability token issuance requires a future expiry");
+  }
+
+  const payload: CapabilityTokenPayload = {
+    version: CAPABILITY_TOKEN_VERSION,
+    tokenId: randomUUID(),
+    issuer: "agent-foundry",
+    algorithm: "EdDSA",
+    keyId: input.keyId,
+    decisionId: resolution.decisionId,
+    contractSha256: resolution.evidence.contractSha256,
+    taskId: resolution.evidence.taskId,
+    planId: resolution.evidence.planId,
+    sessionId: resolution.evidence.sessionId,
+    roleIds: uniqueSorted(resolution.selectedRoleIds),
+    capabilities: uniqueSorted(resolution.selectedCapabilities),
+    issuedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+  const encodedPayload = encodeBase64Url(canonicalJson(payload));
+  const signature = signCapabilityPayload(encodedPayload, privateKeyPem);
+  const token = `afct1.${encodedPayload}.${signature}`;
+  return {
+    token,
+    tokenSha256: sha256Text(token),
+    payload,
+  };
+}
+
+export type CapabilityTokenVerification =
+  | { valid: true; payload: CapabilityTokenPayload; tokenSha256: string }
+  | { valid: false; reason: string; tokenSha256: string };
+
+export function verifyCapabilityToken(input: {
+  token: string;
+  publicKeyPem: string;
+  expectedKeyId: string;
+  now: string;
+  expectedTaskId: string;
+  expectedPlanId: string;
+  expectedDecisionId?: string;
+  revokedTokenSha256s: string[];
+}): CapabilityTokenVerification {
+  const verificationKey = requirePublicVerificationKey(input.publicKeyPem);
+  const tokenSha256 = sha256Text(input.token);
+  if (!Array.isArray(input.revokedTokenSha256s)) {
+    return { valid: false, reason: "revocation_state_required", tokenSha256 };
+  }
+  const parts = input.token.split(".");
+  if (parts.length !== 3 || parts[0] !== "afct1") {
+    return { valid: false, reason: "malformed_token", tokenSha256 };
+  }
+  const encodedPayload = parts[1]!;
+  const suppliedSignature = parts[2]!;
+  let suppliedSignatureBytes: Buffer;
+  try {
+    suppliedSignatureBytes = decodeBase64Url(suppliedSignature);
+  } catch {
+    return { valid: false, reason: "invalid_signature", tokenSha256 };
+  }
+  const signatureValid = verify(
+    null,
+    Buffer.from(`afct1.${encodedPayload}`, "utf8"),
+    verificationKey,
+    suppliedSignatureBytes,
+  );
+  if (!signatureValid) {
+    return { valid: false, reason: "invalid_signature", tokenSha256 };
+  }
+
+  let payload: CapabilityTokenPayload;
+  try {
+    payload = JSON.parse(decodeBase64Url(encodedPayload).toString("utf8")) as CapabilityTokenPayload;
+  } catch {
+    return { valid: false, reason: "invalid_payload", tokenSha256 };
+  }
+
+  if (payload.version !== CAPABILITY_TOKEN_VERSION
+    || payload.issuer !== "agent-foundry"
+    || payload.algorithm !== "EdDSA") {
+    return { valid: false, reason: "unsupported_token", tokenSha256 };
+  }
+  if (payload.keyId !== input.expectedKeyId) {
+    return { valid: false, reason: "key_mismatch", tokenSha256 };
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(String(payload.tokenId ?? ""))
+    || !/^[a-f0-9]{64}$/.test(String(payload.decisionId ?? ""))
+    || !/^[a-f0-9]{64}$/.test(String(payload.contractSha256 ?? ""))
+    || !payload.taskId || !payload.planId || !Array.isArray(payload.roleIds)
+    || !payload.roleIds.length || !Array.isArray(payload.capabilities) || !payload.capabilities.length) {
+    return { valid: false, reason: "invalid_payload", tokenSha256 };
+  }
+
+  let nowMs: number;
+  let issuedAtMs: number;
+  let expiresAtMs: number;
+  try {
+    nowMs = parseIso(input.now, "verification time");
+    issuedAtMs = parseIso(payload.issuedAt, "issuedAt");
+    expiresAtMs = parseIso(payload.expiresAt, "expiresAt");
+  } catch {
+    return { valid: false, reason: "invalid_time_claims", tokenSha256 };
+  }
+  if (expiresAtMs <= issuedAtMs
+    || expiresAtMs - issuedAtMs > MAX_CAPABILITY_TOKEN_TTL_SECONDS * 1000) {
+    return { valid: false, reason: "invalid_lifetime", tokenSha256 };
+  }
+  if (nowMs >= expiresAtMs) {
+    return { valid: false, reason: "expired", tokenSha256 };
+  }
+  if (issuedAtMs > nowMs) {
+    return { valid: false, reason: "not_yet_valid", tokenSha256 };
+  }
+  if (payload.taskId !== input.expectedTaskId) {
+    return { valid: false, reason: "task_mismatch", tokenSha256 };
+  }
+  if (payload.planId !== input.expectedPlanId) {
+    return { valid: false, reason: "plan_mismatch", tokenSha256 };
+  }
+  if (input.expectedDecisionId && payload.decisionId !== input.expectedDecisionId) {
+    return { valid: false, reason: "decision_mismatch", tokenSha256 };
+  }
+  if (input.revokedTokenSha256s.includes(tokenSha256)) {
+    return { valid: false, reason: "revoked", tokenSha256 };
+  }
+  return { valid: true, payload, tokenSha256 };
 }

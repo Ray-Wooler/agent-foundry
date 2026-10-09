@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveAuthority } from "../dist/index.js";
+import { generateKeyPairSync } from "node:crypto";
+import {
+  issueCapabilityToken,
+  resolveAuthority,
+  verifyCapabilityToken,
+} from "../dist/index.js";
 
 const now="2026-10-09T00:00:00.000Z";
 const contract={
@@ -339,4 +344,216 @@ test("resolver rejects a CAC that weakens fail-closed runtime enforcement",()=>{
     })),
     /runtime enforcement contract/
   );
+});
+
+
+const tokenKeyPair=generateKeyPairSync("ed25519");
+const privateKeyPem=tokenKeyPair.privateKey.export({format:"pem",type:"pkcs8"}).toString();
+const publicKeyPem=tokenKeyPair.publicKey.export({format:"pem",type:"spki"}).toString();
+
+test("issues a short-lived token only from an ALLOW decision",()=>{
+  const resolution=resolveAuthority(input());
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:120
+  });
+  assert.match(issued.token,/^afct1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.match(issued.tokenSha256,/^[a-f0-9]{64}$/);
+  assert.equal(issued.payload.decisionId,resolution.decisionId);
+  assert.equal(issued.payload.taskId,"task-1");
+  assert.equal(issued.payload.planId,"plan-1");
+  assert.deepEqual(issued.payload.capabilities,["mail.read"]);
+  assert.equal(issued.payload.expiresAt,"2026-10-09T00:02:00.000Z");
+
+  const needsApproval=resolveAuthority(input({authorizations:[]}));
+  assert.throws(
+    ()=>issueCapabilityToken({
+      resolution:needsApproval,
+      privateKeyPem,
+      keyId:"ci-key-1",
+      now:"2026-10-09T00:00:00.000Z"
+    }),
+    /requires an ALLOW/
+  );
+});
+
+test("token expiry is clamped to supporting authorization expiry",()=>{
+  const resolution=resolveAuthority(input({
+    authorizations:[
+      {authorizationId:"short-auth",roleId:"reader",mode:"AUTHORIZE_ROLE",expiresAt:"2026-10-09T00:01:00.000Z"}
+    ]
+  }));
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:300
+  });
+  assert.equal(issued.payload.expiresAt,"2026-10-09T00:01:00.000Z");
+});
+
+test("verifies a token only for its bound task and plan",()=>{
+  const resolution=resolveAuthority(input());
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:120
+  });
+  const valid=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1",
+    expectedDecisionId:resolution.decisionId
+  });
+  assert.equal(valid.valid,true);
+
+  const taskReplay=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-other",
+    expectedPlanId:"plan-1"
+  });
+  assert.deepEqual(taskReplay.valid?null:taskReplay.reason,"task_mismatch");
+
+  const planReplay=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-other"
+  });
+  assert.deepEqual(planReplay.valid?null:planReplay.reason,"plan_mismatch");
+});
+
+test("expiry, revocation and signature tampering fail closed",()=>{
+  const resolution=resolveAuthority(input());
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:60
+  });
+
+  const expired=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:01:00.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1"
+  });
+  assert.deepEqual(expired.valid?null:expired.reason,"expired");
+
+  const revoked=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1",
+    revokedTokenSha256s:[issued.tokenSha256]
+  });
+  assert.deepEqual(revoked.valid?null:revoked.reason,"revoked");
+
+  const [prefix,payloadPart,signaturePart]=issued.token.split(".");
+  const tamperedPayload=(payloadPart[0]==="A"?"B":"A")+payloadPart.slice(1);
+  const tampered=`${prefix}.${tamperedPayload}.${signaturePart}`;
+  const invalid=verifyCapabilityToken({
+    token:tampered,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1"
+  });
+  assert.deepEqual(invalid.valid?null:invalid.reason,"invalid_signature");
+});
+
+test("token issuance rejects stale/tampered decision evidence and excessive ttl",()=>{
+  const resolution=resolveAuthority(input());
+  const tampered={
+    ...resolution,
+    evidence:{...resolution.evidence,reasons:["tampered"]}
+  };
+  assert.throws(
+    ()=>issueCapabilityToken({
+      resolution:tampered,
+      privateKeyPem,
+      keyId:"ci-key-1",
+      now:"2026-10-09T00:00:00.000Z"
+    }),
+    /non-canonical/
+  );
+  assert.throws(
+    ()=>issueCapabilityToken({
+      resolution,
+      privateKeyPem,
+      keyId:"ci-key-1",
+      now:"2026-10-09T00:00:00.000Z",
+      ttlSeconds:901
+    }),
+    /ttl must be between/
+  );
+  assert.throws(
+    ()=>issueCapabilityToken({
+      resolution,
+      privateKeyPem,
+      keyId:"ci-key-1",
+      now:"2026-10-09T00:05:01.000Z"
+    }),
+    /stale authority decision/
+  );
+});
+
+
+test("verification requires explicit revocation state and expected signing key id",()=>{
+  const resolution=resolveAuthority(input());
+  const issued=issueCapabilityToken({
+    resolution,
+    privateKeyPem,
+    keyId:"ci-key-1",
+    now:"2026-10-09T00:00:00.000Z",
+    ttlSeconds:60
+  });
+  const missingRevocation=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-1",
+    revokedTokenSha256s:undefined,
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1"
+  });
+  assert.equal(missingRevocation.valid,false);
+  assert.equal(missingRevocation.reason,"revocation_state_required");
+
+  const wrongKeyId=verifyCapabilityToken({
+    token:issued.token,
+    publicKeyPem,
+    expectedKeyId:"ci-key-2",
+    revokedTokenSha256s:[],
+    now:"2026-10-09T00:00:30.000Z",
+    expectedTaskId:"task-1",
+    expectedPlanId:"plan-1"
+  });
+  assert.equal(wrongKeyId.valid,false);
+  assert.equal(wrongKeyId.reason,"key_mismatch");
 });
