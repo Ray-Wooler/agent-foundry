@@ -1,6 +1,6 @@
 # ADR-0008 — Authority Decision Persistence and Task Capability Tokens
 
-Status: PROPOSED
+Status: ACCEPTED
 
 ## Context
 
