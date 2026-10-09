@@ -90,10 +90,16 @@ function validNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function sameTime(a: string, b: string): boolean {
-  const aa = Date.parse(a);
-  const bb = Date.parse(b);
-  return !Number.isNaN(aa) && !Number.isNaN(bb) && aa === bb;
+function parseTimestamp(value: unknown): number | null {
+  if (!validNonEmpty(value)) return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function sameTime(a: unknown, b: unknown): boolean {
+  const aa = parseTimestamp(a);
+  const bb = parseTimestamp(b);
+  return aa !== null && bb !== null && aa === bb;
 }
 
 function tokenStateMatchesPayload(
@@ -122,9 +128,9 @@ function buildDecision(
   payload: CapabilityTokenPayload | null,
 ): PolicyEnforcementDecision {
   const state = input?.persistedTokenState ?? null;
-  const rawNow = input?.now ?? "";
-  const parsedNow = Date.parse(rawNow);
-  const evaluatedAt = Number.isNaN(parsedNow) ? null : new Date(parsedNow).toISOString();
+  const rawNow = input?.now;
+  const parsedNow = parseTimestamp(rawNow);
+  const evaluatedAt = parsedNow === null ? null : new Date(parsedNow).toISOString();
   const safeRequiredCapabilities = input?.binding && Array.isArray(input.binding.requiredCapabilities)
     ? input.binding.requiredCapabilities.filter(validNonEmpty)
     : [];
@@ -172,7 +178,7 @@ export function enforceInvocation(input: PolicyEnforcementInput): PolicyEnforcem
     || !validNonEmpty(input.token)
     || !validNonEmpty(input.publicKeyPem)
     || !validNonEmpty(input.expectedKeyId)
-    || Number.isNaN(Date.parse(input.now))
+    || parseTimestamp(input.now) === null
     || !input.invocation
     || !validNonEmpty(input.invocation.taskId)
     || !validNonEmpty(input.invocation.planId)
@@ -210,8 +216,8 @@ export function enforceInvocation(input: PolicyEnforcementInput): PolicyEnforcem
     || state.roleIds.some((roleId) => !validNonEmpty(roleId))
     || !Array.isArray(state.capabilities) || state.capabilities.length === 0
     || state.capabilities.some((capability) => !validNonEmpty(capability))
-    || Number.isNaN(Date.parse(state.issuedAt))
-    || Number.isNaN(Date.parse(state.expiresAt))) {
+    || parseTimestamp(state.issuedAt) === null
+    || parseTimestamp(state.expiresAt) === null) {
     return buildDecision(input, "DENY", "invalid_persisted_token_state", tokenSha256, null);
   }
   if (state.tokenSha256 !== tokenSha256) {
