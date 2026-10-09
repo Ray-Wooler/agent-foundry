@@ -1,6 +1,6 @@
 # ADR-0010 — Credential Broker Core
 
-Status: PROPOSED
+Status: ACCEPTED
 
 ## Context
 
@@ -133,3 +133,7 @@ This ADR becomes ACCEPTED when:
 - workspace regression tests pass;
 - exact-head CI is green;
 - independent review finds no unresolved high-consequence defect.
+
+## Acceptance evidence
+
+Exact PR head `c7551deffc0b82cd86101da53fc045c4b4651255` completed all 18 associated CI workflows successfully, including Credential Broker, Policy Enforcement Point, Authority Token Issuance and Production Operations. The exit review found no unresolved high-consequence defect in the bounded credential-isolation scope.
