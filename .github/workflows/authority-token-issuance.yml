@@ -1,0 +1,58 @@
+name: Authority Token Issuance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "packages/authority/**"
+      - "packages/db/**"
+      - "migrations/0011_authority_decisions_tokens.sql"
+      - "scripts/test_authority_token_gate.mjs"
+      - "docs/architecture/ADR-0008-AUTHORITY-DECISION-PERSISTENCE-CAPABILITY-TOKENS.md"
+      - ".github/workflows/authority-token-issuance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  authority-token-issuance:
+    name: Authority Token Issuance
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://foundry:foundry@localhost:5432/foundry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.12.4 --activate
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck workspace
+        run: pnpm typecheck
+      - name: Build workspace
+        run: pnpm build
+      - name: Verify resolver and token contracts
+        run: pnpm --filter @agent-foundry/authority test
+      - name: Apply database migrations
+        run: pnpm db:migrate
+      - name: Verify authority decision persistence and token lifecycle
+        run: node scripts/test_authority_token_gate.mjs
