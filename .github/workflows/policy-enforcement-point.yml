@@ -1,0 +1,59 @@
+name: Policy Enforcement Point
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "packages/enforcement/**"
+      - "packages/authority/**"
+      - "packages/db/**"
+      - "migrations/0012_policy_enforcement_audit.sql"
+      - "scripts/test_policy_enforcement_point.mjs"
+      - "docs/architecture/ADR-0009-RUNTIME-POLICY-ENFORCEMENT-POINT-CORE.md"
+      - ".github/workflows/policy-enforcement-point.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  policy-enforcement-point:
+    name: Policy Enforcement Point
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: foundry
+          POSTGRES_PASSWORD: foundry
+          POSTGRES_DB: foundry
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U foundry -d foundry"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://foundry:foundry@localhost:5432/foundry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.12.4 --activate
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck workspace
+        run: pnpm typecheck
+      - name: Build workspace
+        run: pnpm build
+      - name: Verify enforcement core
+        run: pnpm --filter @agent-foundry/enforcement test
+      - name: Apply database migrations
+        run: pnpm db:migrate
+      - name: Verify durable-state enforcement integration
+        run: node scripts/test_policy_enforcement_point.mjs

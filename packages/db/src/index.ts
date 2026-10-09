@@ -233,6 +233,7 @@ export async function persistCapabilityTokenRecord(
 }
 
 export async function getCapabilityTokenState(tokenSha256: string): Promise<{
+  tokenSha256: string;
   tokenId: string;
   decisionId: string;
   taskId: string;
@@ -249,6 +250,7 @@ export async function getCapabilityTokenState(tokenSha256: string): Promise<{
   revocationReason: string | null;
 } | null> {
   const result = await query<{
+    token_sha256: string;
     token_id: string;
     decision_id: string;
     task_id: string;
@@ -264,7 +266,7 @@ export async function getCapabilityTokenState(tokenSha256: string): Promise<{
     revoked_at: string | null;
     revocation_reason: string | null;
   }>(
-    `SELECT token_id,decision_id,task_id,plan_id,session_id,contract_sha256,
+    `SELECT token_sha256,token_id,decision_id,task_id,plan_id,session_id,contract_sha256,
             role_ids,capabilities,key_id,algorithm,issued_at::text,
             expires_at::text,revoked_at::text,revocation_reason
      FROM capability_token_records
@@ -274,6 +276,7 @@ export async function getCapabilityTokenState(tokenSha256: string): Promise<{
   const row = result.rows[0];
   if (!row) return null;
   return {
+    tokenSha256: row.token_sha256,
     tokenId: row.token_id,
     decisionId: row.decision_id,
     taskId: row.task_id,
@@ -313,4 +316,106 @@ export async function revokeCapabilityToken(
   );
   if (!existing.rowCount) throw new Error("capability token not found");
   return { revoked: false, revokedAt: existing.rows[0]!.revoked_at };
+}
+
+
+export type PersistedPolicyEnforcementDecision = {
+  evidenceId: string;
+  outcome: "ALLOW" | "DENY";
+  evidence: {
+    pepVersion: string;
+    evaluatedAt: string;
+    outcome: "ALLOW" | "DENY";
+    reason: string;
+    tokenSha256: string;
+    decisionId: string | null;
+    taskId: string;
+    planId: string;
+    [key: string]: unknown;
+  };
+};
+
+export async function persistPolicyEnforcementDecision(
+  decision: PersistedPolicyEnforcementDecision,
+): Promise<{ auditRecordId: string; evidenceId: string; inserted: boolean }> {
+  if (decision.evidence.outcome !== decision.outcome) {
+    throw new Error("policy enforcement outcome does not match evidence");
+  }
+  const evidenceId = sha256Text(canonicalJson(decision.evidence));
+  if (evidenceId !== decision.evidenceId || !/^[a-f0-9]{64}$/.test(evidenceId)) {
+    throw new Error("policy enforcement evidence id does not match canonical evidence");
+  }
+  if (!/^[a-f0-9]{64}$/.test(decision.evidence.tokenSha256)) {
+    throw new Error("policy enforcement evidence requires token SHA-256");
+  }
+  if (!decision.evidence.pepVersion
+    || !decision.evidence.reason
+    || !decision.evidence.taskId
+    || !decision.evidence.planId
+    || Number.isNaN(Date.parse(decision.evidence.evaluatedAt))) {
+    throw new Error("policy enforcement evidence is incomplete");
+  }
+  if (decision.evidence.decisionId !== null
+    && !/^[a-f0-9]{64}$/.test(decision.evidence.decisionId)) {
+    throw new Error("policy enforcement evidence has invalid authority decision id");
+  }
+  if (decision.outcome === "ALLOW" && decision.evidence.decisionId === null) {
+    throw new Error("allowed policy enforcement evidence requires authority decision id");
+  }
+
+  return transaction(async (client) => {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+      [evidenceId],
+    );
+
+    const action = decision.outcome === "ALLOW"
+      ? "protected_invocation_allowed"
+      : "protected_invocation_denied";
+    const correlationId = `${decision.evidence.taskId}:${decision.evidence.planId}`;
+    const authorityReference = decision.evidence.decisionId;
+
+    const existing = await client.query<{
+      id: string;
+      action: string;
+      authority_reference: string | null;
+      correlation_id: string | null;
+      evidence: unknown;
+    }>(
+      `SELECT id,action,authority_reference,correlation_id,evidence
+       FROM audit_records
+       WHERE target_type='policy_enforcement_decision' AND target_id=$1
+       ORDER BY recorded_at ASC
+       LIMIT 1`,
+      [evidenceId],
+    );
+
+    if (existing.rowCount) {
+      const row = existing.rows[0]!;
+      if (row.action !== action
+        || row.authority_reference !== authorityReference
+        || row.correlation_id !== correlationId
+        || canonicalJson(row.evidence) !== canonicalJson(decision.evidence)) {
+        throw new Error("policy enforcement audit persistence conflict");
+      }
+      return { auditRecordId: row.id, evidenceId, inserted: false };
+    }
+
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO audit_records(
+         actor,action,target_type,target_id,authority_reference,correlation_id,evidence
+       ) VALUES (
+         'policy-enforcement-point',$1,'policy_enforcement_decision',$2,$3,$4,$5::jsonb
+       )
+       RETURNING id`,
+      [
+        action,
+        evidenceId,
+        authorityReference,
+        correlationId,
+        JSON.stringify(decision.evidence),
+      ],
+    );
+    return { auditRecordId: inserted.rows[0]!.id, evidenceId, inserted: true };
+  });
 }
