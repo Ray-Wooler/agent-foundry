@@ -139,7 +139,11 @@ function buildDecision(
     contractSha256: payload?.contractSha256 ?? state?.contractSha256 ?? null,
     taskId: validNonEmpty(input?.invocation?.taskId) ? input!.invocation.taskId : "UNAVAILABLE",
     planId: validNonEmpty(input?.invocation?.planId) ? input!.invocation.planId : "UNAVAILABLE",
-    sessionId: input?.invocation?.sessionId ?? null,
+    sessionId: input?.invocation?.sessionId === null
+      ? null
+      : validNonEmpty(input?.invocation?.sessionId)
+        ? input!.invocation.sessionId
+        : "UNAVAILABLE",
     toolId: validNonEmpty(input?.invocation?.toolId) ? input!.invocation.toolId : "UNAVAILABLE",
     operation: validNonEmpty(input?.invocation?.operation) ? input!.invocation.operation : "UNAVAILABLE",
     bindingId: validNonEmpty(input?.binding?.bindingId) ? input!.binding.bindingId : "UNAVAILABLE",
@@ -201,8 +205,13 @@ export function enforceInvocation(input: PolicyEnforcementInput): PolicyEnforcem
     || !validSha256(state.contractSha256)
     || !validNonEmpty(state.keyId)
     || state.algorithm !== "EdDSA"
+    || (state.sessionId !== null && !validNonEmpty(state.sessionId))
     || !Array.isArray(state.roleIds) || state.roleIds.length === 0
-    || !Array.isArray(state.capabilities) || state.capabilities.length === 0) {
+    || state.roleIds.some((roleId) => !validNonEmpty(roleId))
+    || !Array.isArray(state.capabilities) || state.capabilities.length === 0
+    || state.capabilities.some((capability) => !validNonEmpty(capability))
+    || Number.isNaN(Date.parse(state.issuedAt))
+    || Number.isNaN(Date.parse(state.expiresAt))) {
     return buildDecision(input, "DENY", "invalid_persisted_token_state", tokenSha256, null);
   }
   if (state.tokenSha256 !== tokenSha256) {
