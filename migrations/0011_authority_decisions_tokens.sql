@@ -10,7 +10,14 @@ CREATE TABLE authority_decision_records (
   contract_sha256 text NOT NULL CHECK (contract_sha256 ~ '^[a-f0-9]{64}$'),
   evidence jsonb NOT NULL,
   evidence_sha256 text NOT NULL CHECK (evidence_sha256 ~ '^[a-f0-9]{64}$'),
-  recorded_at timestamptz NOT NULL DEFAULT now()
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (evidence ? 'decisionStatus' AND evidence->>'decisionStatus' = decision_status),
+  CHECK (evidence ? 'resolverVersion' AND evidence->>'resolverVersion' = resolver_version),
+  CHECK (evidence ? 'taskId' AND evidence->>'taskId' = task_id),
+  CHECK (evidence ? 'planId' AND evidence->>'planId' = plan_id),
+  CHECK (evidence ? 'sessionId' AND COALESCE(evidence->>'sessionId','') = COALESCE(session_id,'')),
+  CHECK (evidence ? 'contractSha256' AND evidence->>'contractSha256' = contract_sha256),
+  CHECK (evidence ? 'evaluatedAt' AND (evidence->>'evaluatedAt')::timestamptz IS NOT NULL)
 );
 
 CREATE TABLE capability_token_records (
@@ -33,6 +40,7 @@ CREATE TABLE capability_token_records (
   revocation_reason text,
   created_at timestamptz NOT NULL DEFAULT now(),
   CHECK (expires_at > issued_at),
+  CHECK (expires_at <= issued_at + interval '900 seconds'),
   CHECK ((revoked_at IS NULL AND revocation_reason IS NULL)
       OR (revoked_at IS NOT NULL AND revocation_reason IS NOT NULL))
 );
@@ -83,6 +91,10 @@ BEGIN
 
   IF supporting_expiry IS NULL OR NEW.expires_at > supporting_expiry THEN
     RAISE EXCEPTION 'capability token expiry exceeds supporting authorization';
+  END IF;
+  IF NEW.issued_at < (decision.evidence->>'evaluatedAt')::timestamptz
+     OR NEW.issued_at > (decision.evidence->>'evaluatedAt')::timestamptz + interval '300 seconds' THEN
+    RAISE EXCEPTION 'capability token issuance is outside authority decision freshness window';
   END IF;
   RETURN NEW;
 END $$;

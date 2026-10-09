@@ -74,7 +74,7 @@ The subsequent Policy Enforcement Point gate must consult durable token state be
 
 `capability_token_records` has immutable identity and claims. The only permitted lifecycle mutation is one-way revocation with a mandatory reason. Revocation cannot be removed or rewritten and token rows cannot be deleted.
 
-Database enforcement prevents creation of a capability-token record unless its referenced decision is `ALLOW` and its task, plan and CAC digest match that persisted decision.
+Database enforcement cross-checks decision status and identity against canonical evidence, and prevents creation of a capability-token record unless its referenced decision is `ALLOW`, its task/plan/session/CAC/roles/capabilities match that persisted decision, its lifetime is no more than 900 seconds, its issuance is within the 300-second decision-freshness window, and its expiry does not exceed supporting authorization.
 
 ## Explicit non-decisions
 

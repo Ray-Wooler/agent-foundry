@@ -160,6 +160,35 @@ try {
     /hash does not match/
   );
   await assert.rejects(
+    persistCapabilityTokenRecord({
+      ...issued,
+      tokenSha256:issued.tokenSha256,
+      payload:{...issued.payload,planId:"payload-mismatch"}
+    }),
+    /payload does not match bearer token/
+  );
+  await assert.rejects(
+    query(
+      `INSERT INTO authority_decision_records(
+         decision_id,resolver_version,decision_status,task_id,plan_id,session_id,
+         contract_sha256,evidence,evidence_sha256
+       ) VALUES ($1,'test-resolver','ALLOW','bad-task','bad-plan',NULL,$2,$3::jsonb,$1)`,
+      [
+        "d".repeat(64),
+        "e".repeat(64),
+        JSON.stringify({
+          decisionStatus:"DENY",
+          resolverVersion:"test-resolver",
+          taskId:"bad-task",
+          planId:"bad-plan",
+          sessionId:null,
+          contractSha256:"e".repeat(64)
+        })
+      ]
+    ),
+    /check constraint/
+  );
+  await assert.rejects(
     query("UPDATE capability_token_records SET revocation_reason='changed later' WHERE token_sha256=$1",[issued.tokenSha256]),
     /capability token revocation is immutable/
   );
@@ -183,6 +212,27 @@ try {
       ]
     ),
     /expiry exceeds supporting authorization/
+  );
+  await assert.rejects(
+    query(
+      `INSERT INTO capability_token_records(
+         token_id,decision_id,token_sha256,token_version,issuer,algorithm,key_id,
+         task_id,plan_id,session_id,contract_sha256,role_ids,capabilities,issued_at,expires_at
+       ) VALUES (
+         gen_random_uuid(),$1,$2,'1.0','agent-foundry','EdDSA','ci-key-1',
+         $3,$4,NULL,$5,'["reader"]'::jsonb,'["mail.read"]'::jsonb,$6,$7
+       )`,
+      [
+        resolution.decisionId,
+        "f".repeat(64),
+        resolution.evidence.taskId,
+        resolution.evidence.planId,
+        resolution.evidence.contractSha256,
+        "2026-10-09T00:05:01.000Z",
+        "2026-10-09T00:06:01.000Z"
+      ]
+    ),
+    /outside authority decision freshness window/
   );
   await assert.rejects(
     query(

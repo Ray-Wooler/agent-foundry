@@ -138,6 +138,19 @@ export async function persistCapabilityTokenRecord(
   if (sha256Text(issued.token) !== issued.tokenSha256) {
     throw new Error("capability token hash does not match bearer token");
   }
+  const tokenParts = issued.token.split(".");
+  if (tokenParts.length !== 3 || tokenParts[0] !== "afct1") {
+    throw new Error("capability token persistence rejected malformed bearer token");
+  }
+  let embeddedPayload: unknown;
+  try {
+    embeddedPayload = JSON.parse(Buffer.from(tokenParts[1]!, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("capability token persistence rejected invalid bearer payload");
+  }
+  if (canonicalJson(embeddedPayload) !== canonicalJson(issued.payload)) {
+    throw new Error("capability token persistence payload does not match bearer token");
+  }
   const decision = await query<{ decision_status: string }>(
     `SELECT decision_status
      FROM authority_decision_records
