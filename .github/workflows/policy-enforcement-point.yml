@@ -7,7 +7,9 @@ on:
     paths:
       - "packages/enforcement/**"
       - "packages/authority/**"
+      - "packages/domain/**"
       - "packages/db/**"
+      - "migrations/0011_authority_decisions_tokens.sql"
       - "migrations/0012_policy_enforcement_audit.sql"
       - "scripts/test_policy_enforcement_point.mjs"
       - "docs/architecture/ADR-0009-RUNTIME-POLICY-ENFORCEMENT-POINT-CORE.md"

@@ -6,6 +6,9 @@ CREATE UNIQUE INDEX uq_policy_enforcement_evidence
 
 CREATE OR REPLACE FUNCTION validate_policy_enforcement_audit()
 RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  evaluated_at timestamptz;
+  allow_match_count integer;
 BEGIN
   IF NEW.target_type <> 'policy_enforcement_decision' THEN
     RETURN NEW;
@@ -33,8 +36,39 @@ BEGIN
   IF COALESCE(NEW.evidence->>'taskId','')=''
      OR COALESCE(NEW.evidence->>'planId','')=''
      OR COALESCE(NEW.evidence->>'pepVersion','')=''
-     OR COALESCE(NEW.evidence->>'reason','')='' THEN
+     OR COALESCE(NEW.evidence->>'reason','')=''
+     OR COALESCE(NEW.evidence->>'evaluatedAt','')='' THEN
     RAISE EXCEPTION 'policy enforcement audit evidence incomplete';
+  END IF;
+
+  BEGIN
+    evaluated_at := (NEW.evidence->>'evaluatedAt')::timestamptz;
+  EXCEPTION WHEN others THEN
+    RAISE EXCEPTION 'policy enforcement evaluatedAt must be a timestamp';
+  END;
+
+  IF NEW.action='protected_invocation_allowed' THEN
+    IF COALESCE(NEW.evidence->>'decisionId','') !~ '^[a-f0-9]{64}$' THEN
+      RAISE EXCEPTION 'allowed policy enforcement requires authority decision id';
+    END IF;
+
+    SELECT count(*)
+      INTO allow_match_count
+    FROM capability_token_records t
+    JOIN authority_decision_records d ON d.decision_id=t.decision_id
+    WHERE t.token_sha256=NEW.evidence->>'tokenSha256'
+      AND t.decision_id=NEW.evidence->>'decisionId'
+      AND d.decision_status='ALLOW'
+      AND t.task_id=NEW.evidence->>'taskId'
+      AND t.plan_id=NEW.evidence->>'planId'
+      AND COALESCE(t.session_id,'')=COALESCE(NEW.evidence->>'sessionId','')
+      AND t.issued_at <= evaluated_at
+      AND t.expires_at > evaluated_at
+      AND (t.revoked_at IS NULL OR t.revoked_at > evaluated_at);
+
+    IF allow_match_count <> 1 THEN
+      RAISE EXCEPTION 'allowed policy enforcement is not backed by active persisted authority';
+    END IF;
   END IF;
   RETURN NEW;
 END $$;

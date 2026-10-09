@@ -188,6 +188,24 @@ try {
   );
 
   await assert.rejects(
+    query(
+      `INSERT INTO audit_records(
+         actor,action,target_type,target_id,authority_reference,correlation_id,evidence
+       ) VALUES (
+         'policy-enforcement-point','protected_invocation_allowed',
+         'policy_enforcement_decision',$1,$2,$3,$4::jsonb
+       )`,
+      [
+        "d".repeat(64),
+        allowed.evidence.decisionId,
+        `${allowed.evidence.taskId}:${allowed.evidence.planId}`,
+        JSON.stringify({...allowed.evidence,tokenSha256:"c".repeat(64)})
+      ]
+    ),
+    /not backed by active persisted authority/
+  );
+
+  await assert.rejects(
     persistPolicyEnforcementDecision({
       ...allowed,
       evidence:{...allowed.evidence,reason:"tampered"}
